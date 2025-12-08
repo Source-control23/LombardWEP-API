@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36623.8 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LombardAPI_NEW", "LombardAPI_NEW\LombardAPI_NEW.csproj", "{3800CBBE-3D26-47D9-8B5E-90E86A8F452B}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3800CBBE-3D26-47D9-8B5E-90E86A8F452B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3800CBBE-3D26-47D9-8B5E-90E86A8F452B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3800CBBE-3D26-47D9-8B5E-90E86A8F452B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3800CBBE-3D26-47D9-8B5E-90E86A8F452B}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {C5EAC4AC-7978-44F5-8CE7-F925E0139B11}
+	EndGlobalSection
+EndGlobal
