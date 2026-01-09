@@ -2,7 +2,6 @@
 using LombardAPI_NEW.Interfaces;
 using LombardAPI_NEW.Models;
 using LombardAPI_NEW.Models.DTOs;
-using Microsoft.EntityFrameworkCore;
 
 namespace LombardAPI_NEW.Services
 {
@@ -10,72 +9,68 @@ namespace LombardAPI_NEW.Services
     {
         private readonly DataBaseContext _context;
         private readonly IEmailService _emailService;
+        private readonly ILogger<RightsManagementService> _logger;
 
-        public RightsManagementService(DataBaseContext context, IEmailService emailService)
+        public RightsManagementService(
+            DataBaseContext context,
+            IEmailService emailService,
+            ILogger<RightsManagementService> logger)
         {
             _context = context;
             _emailService = emailService;
+            _logger = logger;
         }
+
         public async Task<bool> AddOrRemoveRightsAsync(AddOrRemoveRightsDTO dto)
         {
             try
             {
-                string result = await SaveToDB(dto);
-                if (result == "")
+                string approvalId = await SaveToDB(dto);
+
+                if (string.IsNullOrEmpty(approvalId))
                 {
+                    _logger.LogWarning("DB save failed for DL {DLName}", dto.DLName);
                     return false;
                 }
-                string link = $"http://localhost:4200/approval?id={result}";
+
+                string link = $"http://localhost:4200/approval?id={approvalId}";
+
                 string body = $@"
-  <div style='font-family:Segoe UI,Arial,sans-serif; font-size:14px; color:#333; line-height:1.6;'>
-      
-      <p>Dear Team,</p>
+<div style='font-family:Segoe UI,Arial,sans-serif; font-size:14px; color:#333; line-height:1.6;'>
+    <p>Dear Team,</p>
 
-      <p>
-          A new <strong>DL Rights Approval</strong> requires your review and approval.
-      </p>
+    <p>A new <strong>DL Rights Approval</strong> requires your review.</p>
 
-      <p>
-          Please click the button below to open the approval page:
-      </p>
+    <p style='margin:20px 0;'>
+        <a href='{link}' 
+           style='background-color:#0052cc; color:#fff; padding:10px 18px;
+                  text-decoration:none; border-radius:6px; font-weight:600;'>
+            Open Approval Page
+        </a>
+    </p>
 
-      <p style='margin:20px 0;'>
-          <a href='{link}' 
-             style='background-color:#0052cc; 
-                    color:#fff; 
-                    padding:10px 18px; 
-                    text-decoration:none; 
-                    border-radius:6px;
-                    font-weight:600;'>
-              Open Approval Page
-          </a>
-      </p>
+    <p>If the button does not work, copy & paste this link:</p>
 
-      <p>
-          If the button above does not work, please copy and paste the link below into your browser:
-      </p>
+    <p style='word-break:break-all; color:#0052cc;'>{link}</p>
 
-      <p style='word-break:break-all; color:#0052cc;'>
-          {link}
-      </p>
+    <hr style='border:none; border-top:1px solid #e0e0e0; margin:25px 0;' />
 
-      <hr style='border:none; border-top:1px solid #e0e0e0; margin:25px 0;' />
+    <p style='font-size:12px; color:#777;'>This is an automated email. Please do not reply.</p>
+</div>";
 
-      <p style='font-size:12px; color:#777;'>
-          This is an automated notification. Please do not reply to this email.
-      </p>
+                bool emailSent = await _emailService.SendEmailAsync("", "DL Rights Approval", body);
 
-  </div>";
-                bool emailResult = await _emailService.SendEmailAsync("", "DL Rights Approval", body);
-
-                if (!emailResult)
+                if (!emailSent)
                 {
+                    _logger.LogError("Email sending failed for ApprovalID {ApprovalId}", approvalId);
                     return false;
                 }
+
                 return true;
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "Unhandled error occurred in AddOrRemoveRightsAsync for DL {DLName}", dto.DLName);
                 return false;
             }
         }
@@ -84,10 +79,10 @@ namespace LombardAPI_NEW.Services
         {
             try
             {
-                var dl = new DL
+                DL dlEntry = new DL
                 {
                     ApprovalID = Guid.NewGuid().ToString(),
-                    Event = "Rights",
+                    Event = dto.Source == "OnPrem" ? "Rights | OnPrem" : "Rights | Cloud",
                     DLName = dto.DLName,
                     DLOWner = dto.DLOwner,
                     Action = dto.Action,
@@ -99,13 +94,16 @@ namespace LombardAPI_NEW.Services
                     ApproverEmail = null
                 };
 
-                await _context.DLDetails.AddAsync(dl);
+                await _context.DLDetails.AddAsync(dlEntry);
                 await _context.SaveChangesAsync();
 
-                return dl.ApprovalID;
+                _logger.LogInformation("Saved DL Rights request. ApprovalID: {Id}", dlEntry.ApprovalID);
+
+                return dlEntry.ApprovalID;
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "DB insert failed for DL {DLName}", dto.DLName);
                 return "";
             }
         }

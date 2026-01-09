@@ -7,5 +7,6 @@
         public string? Action { get; set; }
 
         public string? Rights { get; set; }
+        public string? Source { get; set; }
     }
 }

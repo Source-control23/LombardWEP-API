@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿using LombardAPI_NEW.Services;
+using System.Net;
 using System.Net.Mail;
 using System.Threading.Tasks;
 
@@ -11,22 +12,25 @@ public class EmailService : IEmailService
 {
     private readonly SmtpClient _smtpClient;
     private readonly string _fromEmail;
+    private readonly string? _toEmail;
+    private readonly ILogger<EmailService> _logger;
 
-    public EmailService(IConfiguration config)
+    public EmailService(IConfiguration config, ILogger<EmailService> logger)
     {
         _fromEmail = config["EmailSettings:FromEmail"];
-
+        _toEmail = config["EmailSettings:ToEmail"];
+        _logger = logger;
         _smtpClient = new SmtpClient
         {
             Host = config["EmailSettings:SmtpHost"],
             Port = int.Parse(config["EmailSettings:SmtpPort"]),
-            EnableSsl = true,
+            EnableSsl = false,
             DeliveryMethod = SmtpDeliveryMethod.Network,
             UseDefaultCredentials = false,
-            Credentials = new NetworkCredential(
-        config["EmailSettings:Username"],
-        config["EmailSettings:Password"]
-    )
+            //        Credentials = new NetworkCredential(
+            //    config["EmailSettings:Username"],
+            //    config["EmailSettings:Password"]
+            //)
         };
 
     }
@@ -35,6 +39,7 @@ public class EmailService : IEmailService
     {
         try
         {
+            _logger.LogInformation("Email Method started.");
             var mail = new MailMessage
             {
                 From = new MailAddress(_fromEmail),
@@ -43,20 +48,15 @@ public class EmailService : IEmailService
                 IsBodyHtml = true
             };
 
-            mail.To.Add(await GetEmailAddress());
+            mail.To.Add(_toEmail);
 
             await _smtpClient.SendMailAsync(mail);
             return true;
         }
         catch (Exception ex)
         {
+            _logger.LogError($"Eror while sending email : {ex}");
             return false;
         }
-
-    }
-
-    public async Task<string> GetEmailAddress()
-    {
-        return "ayush.kamble@cdpindia.com";
     }
 }

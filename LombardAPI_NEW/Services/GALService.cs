@@ -1,64 +1,135 @@
-﻿using LombardAPI_NEW.Interfaces;
+﻿using LombardAPI_NEW.Extensions;
+using LombardAPI_NEW.Interfaces;
 using LombardAPI_NEW.Models.DTOs;
 using LombardAPI_NEW.Models.Enums;
+using LombardAPI_NEW.Shared;
+using System.Text.Json;
 
 namespace LombardAPI_NEW.Services
 {
     public class GALService : IGAL
     {
+        private readonly ILogger<GALService> _logger;
+
+        public GALService(ILogger<GALService> logger)
+        {
+            _logger = logger;
+        }
+
         public async Task<GALSearchResponseDTO> SearchAsync(GALSearchEnum parameter, string value)
         {
+            using var scope = _logger.BeginScope(
+                "GALSearch | Parameter: {Parameter}, Value: {Value}",
+                parameter, value);
 
-            switch (parameter)
+            try
             {
-                // case GroupMemberSearchParameter.EmployeeId:
+                _logger.LogInformation("GAL search started.");
+
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    _logger.LogWarning("Search value is null or empty.");
+                    return null;
+                }
+
+                // 1. Build PS command (NO ConvertTo-Json here)
+                var psCmd = BuildGALSearchCommand(parameter, value);
+                _logger.LogInformation("Executing GAL PowerShell command.");
+                _logger.LogDebug("PowerShell Command: {Command}", psCmd);
+
+                // 2. Execute PowerShell
+                var jsonResult = Powershell.RunPowerShell(psCmd);
+
+                _logger.LogDebug(
+                    "PowerShell output length: {Length}, snippet: {Snippet}",
+                    jsonResult?.Length ?? 0,
+                    SafeSnippet(jsonResult)
+                );
+
+                if (string.IsNullOrWhiteSpace(jsonResult))
+                {
+                    _logger.LogWarning("Empty PowerShell output received.");
+                    return null;
+                }
+
+                // 3. Deserialize safely
+                JsonElement adResult;
+                try
+                {
+                    adResult = JsonSerializer.Deserialize<JsonElement>(jsonResult);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "JSON deserialization failed for GAL search.");
+                    throw;
+                }
+
+                // Handle multiple results
+                JsonElement adUser =
+                    adResult.ValueKind == JsonValueKind.Array
+                        ? adResult[0]
+                        : adResult;
+
+                _logger.LogInformation("AD user record resolved.");
+
+                // 4. Map fields (ICICI aligned)
+                var response = new GALSearchResponseDTO
+                {
+                    FirstName = adUser.GetPropertyOrDefault("GivenName"),
+                    LastName = adUser.GetPropertyOrDefault("Surname"),
+                    Display = adUser.GetPropertyOrDefault("DisplayName"),
+                    EmpNo = adUser.GetPropertyOrDefault("EmployeeID"),
+                    EmailAddress = adUser.GetPropertyOrDefault("Mail"),
+                    Mobile = adUser.GetPropertyOrDefault("MobilePhone"),
+                    Department = adUser.GetPropertyOrDefault("Department"),
+                    Designation = adUser.GetPropertyOrDefault("Title"),
+                    Manager = adUser.GetPropertyOrDefault("Manager"),
+                    Location = adUser.GetPropertyOrDefault("City"),
+                    Company = adUser.GetPropertyOrDefault("Company"),
+                    Country = adUser.GetPropertyOrDefault("Country")
+                };
+
+                _logger.LogInformation("GAL search completed successfully.");
+                return response;
             }
-            var res = new GALSearchResponseDTO()
+            catch (Exception ex)
             {
-                // Basic Information
-                FirstName = "Ayush",
-                LastName = "Kamble",
-                Grade = "G5",
-                Initials = "AK",
-                Display = "Ayush Kamble",
-                KnownAs = "Ayush",
-                WorkStationID = "WS-1022",
-
-                // Company & Employment Info
-                Company = "TechNova Pvt Ltd",
-                Designation = "Software Engineer",
-                EmpNo = "EMP12345",
-                Group = "IT",
-                Location = "Pune",
-                Department = "Software Development",
-                Manager = "Rohan Patil",
-                DirectReports = "None",
-                MainGroup = "Engineering",
-                CostCenter = "CC-4502",
-                Region = "West",
-
-                // Contact Information
-                BoardNo = "+91-20-123456",
-                DirectPhone = "+91-20-987654",
-                EmailAddress = "ayush.kamble@technova.com",
-                Mobile = "+91-9876543210",
-                Business = "+91-20-554433",
-                CountryCode = "+91",
-                Business2 = "+91-20-443322",
-                CityCode = "020",
-                Fax = "+91-20-442211",
-                Home = "+91-712-665544",
-                Assisted = "N/A",
-
-                // Address Info
-                AddressLocation = "TechNova Campus",
-                Address = "Tower 2, Magarpatta Cybercity",
-                State = "Maharashtra",
-                ZipCode = "411028",
-                Country = "India"
-            };
-
-            return res;
+                _logger.LogError(ex, "Unhandled exception in GAL search.");
+                throw;
+            }
         }
+
+        private string BuildGALSearchCommand(GALSearchEnum parameter, string value)
+        {
+            return parameter switch
+            {
+                GALSearchEnum.EmpId =>
+                    $"Get-ADUser -Filter {{ SamAccountName -like \"*{value}*\" }} -Properties *",
+
+                GALSearchEnum.FirstName =>
+                    $"Get-ADUser -Filter {{ GivenName -like \"*{value}*\" }} -Properties *",
+
+                GALSearchEnum.LastName =>
+                    $"Get-ADUser -Filter {{ Surname -like \"*{value}*\" }} -Properties *",
+
+                GALSearchEnum.Mail =>
+                    $"Get-ADUser -Filter {{ Mail -like \"*{value}*\" }} -Properties *",
+
+                GALSearchEnum.DisplayName =>
+                    $"Get-ADUser -Filter {{ DisplayName -like \"*{value}*\" }} -Properties *",
+
+                _ => throw new ArgumentException("Invalid GAL search parameter")
+            };
+        }
+        private string SafeSnippet(string input, int length = 200)
+        {
+            if (string.IsNullOrEmpty(input))
+                return "NULL/EMPTY";
+
+            return input.Length <= length
+                ? input
+                : input.Substring(0, length) + "...";
+        }
+
     }
 }

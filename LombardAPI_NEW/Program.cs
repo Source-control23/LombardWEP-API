@@ -2,8 +2,15 @@
 using FluentValidation.AspNetCore;
 using LombardAPI_NEW.DataBase;
 using LombardAPI_NEW.Extensions;
+using LombardAPI_NEW.Models;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
+using System.Net;
+
+
+ServicePointManager.SecurityProtocol =
+    SecurityProtocolType.Tls12 | SecurityProtocolType.Tls13;
+
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,7 +35,6 @@ builder.Services.AddAuthorization();
 builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddFluentValidationClientsideAdapters();
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
-
 builder.Services.AddLombardServices();
 
 builder.Services.AddEndpointsApiExplorer();
@@ -47,11 +53,10 @@ builder.Services.AddCors(options =>
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
+
     app.UseSwagger();
     app.UseSwaggerUI();
-}
+
 
 app.UseHttpsRedirection();
 

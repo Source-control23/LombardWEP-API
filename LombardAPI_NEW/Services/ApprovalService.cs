@@ -11,7 +11,7 @@ namespace LombardAPI_NEW.Services
         private readonly DataBaseContext _context;
         private readonly PowershellCommandService _powershellcommand;
 
-        public ApprovalService(DataBaseContext context,PowershellCommandService powershellCommand)
+        public ApprovalService(DataBaseContext context, PowershellCommandService powershellCommand)
         {
             _context = context;
             _powershellcommand = powershellCommand;
@@ -46,21 +46,23 @@ namespace LombardAPI_NEW.Services
                     return false;
                 }
 
-                if (req.Event == "Membership")
+                if (req.Event == "Membership | OnPrem" || req.Event == "Membership | Cloud")
                 {
                     _powershellcommand.GroupMembershipCommand(req);
 
-                }else if (req.Event == "Rights")
+                }
+                else if (req.Event == "Rights | Onprem" || req.Event == "Rights | Cloud")
                 {
                     _powershellcommand.RightsManagementCommand(req);
-                }else if (req.Event == "Unlock")
+                }
+                else if (req.Event == "Unlock")
                 {
                     _powershellcommand.AccountUnlockCommand(req);
                 }
 
-                 var requestToUpdate = await _context.DLDetails
-                                            .Where(d => d.ApprovalID == id )
-                                            .FirstOrDefaultAsync();
+                var requestToUpdate = await _context.DLDetails
+                                           .Where(d => d.ApprovalID == id)
+                                           .FirstOrDefaultAsync();
                 requestToUpdate.ApprovalStatus = "Approved";
                 await _context.SaveChangesAsync();
 

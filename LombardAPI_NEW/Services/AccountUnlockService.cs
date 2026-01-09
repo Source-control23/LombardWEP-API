@@ -2,7 +2,9 @@
 using LombardAPI_NEW.Interfaces;
 using LombardAPI_NEW.Models;
 using LombardAPI_NEW.Models.DTOs;
+using LombardAPI_NEW.Shared;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace LombardAPI_NEW.Services
 {
@@ -16,19 +18,28 @@ namespace LombardAPI_NEW.Services
             _context = context;
             _emailService = emailService;
         }
-        public async Task<DL> GetUserDetailsAsync(string employeeId)
-        {
-            if (employeeId == "E123")
-            {
-                return new DL
-                {
-                    DLName = "Ayush Kamble",
-                    DLOWner = "AK",
-                    IsLocked = true
-                };
-            }
 
-            return null;
+
+        public async Task<AccountUnlockResponseDTO> GetUserDetailsAsync(string employeeId)
+        {
+            var psCmd = $@"
+Get-ADUser -Identity {employeeId} 
+-Properties Enabled,LockedOut,AccountExpirationDate,PasswordExpired,info |
+Select SamAccountName,Enabled,LockedOut,PasswordExpired,AccountExpirationDate,info";
+
+            var json = Powershell.RunPowerShell(psCmd);
+
+            if (string.IsNullOrWhiteSpace(json))
+                return null;
+
+            var user = JsonSerializer.Deserialize<JsonElement>(json);
+
+            return new AccountUnlockResponseDTO
+            {
+                EmployeeId = user.GetProperty("SamAccountName").ToString(),
+                IsLocked = bool.Parse(user.GetProperty("LockedOut").ToString()),
+                Message = user.GetProperty("info").ToString()
+            };
         }
 
         public async Task<string> SaveToDB(AccountUnlockRequestDTO dto)
@@ -61,18 +72,39 @@ namespace LombardAPI_NEW.Services
             }
         }
 
-        public async Task<bool> UnlockAccountAsync(AccountUnlockRequestDTO request)
+        public async Task<ApiResponse> UnlockAccountAsync(AccountUnlockRequestDTO request)
         {
+            // 1️⃣ Unlock AD
+            var unlockCmd = $"Unlock-ADAccount -Identity {request.EmployeeId}";
+            Powershell.RunPowerShell(unlockCmd);
 
-            try
+            // 2️⃣ Save audit
+            var approvalId = await SaveToDB(request);
+            if (string.IsNullOrEmpty(approvalId))
+                return ApiResponse.Fail("Failed to save approval request.");
+
+            // 3️⃣ Send mail
+            var link = $"http://localhost:4200/approval?id={approvalId}";
+            var mailSent = await _emailService.SendEmailAsync(
+                "",
+                "Unlock Lock Account Request",
+                BuildMailBody(link)
+            );
+
+            if (!mailSent)
+                return ApiResponse.Fail("Unlock done but mail failed.");
+
+            return ApiResponse.Ok(new
             {
-                string result = await SaveToDB(request);
-                if (result == "")
-                {
-                    return false;
-                }
-                string link = $"http://localhost:4200/approval?id={result}";
-                string body = $@"
+                EmployeeId = request.EmployeeId,
+                Status = "Account Unlocked",
+                ApprovalId = approvalId
+            });
+        }
+
+        private string BuildMailBody(string link)
+        {
+            return $@"
   <div style='font-family:Segoe UI,Arial,sans-serif; font-size:14px; color:#333; line-height:1.6;'>
       
       <p>Dear Team,</p>
@@ -112,19 +144,11 @@ namespace LombardAPI_NEW.Services
       </p>
 
   </div>";
-                bool emailResult = await _emailService.SendEmailAsync("", "Unlock Lock Account Request", body);
-
-                if (!emailResult)
-                {
-                    return false;
-                }
-                return true;
-            }
-            catch (Exception ex)
-            {
-                return false;
-            }
         }
+
+
+
+
 
     }
 }

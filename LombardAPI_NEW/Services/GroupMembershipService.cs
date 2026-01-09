@@ -1,10 +1,13 @@
 ﻿using LombardAPI_NEW.DataBase;
+using LombardAPI_NEW.ErrorHandling;
 using LombardAPI_NEW.Interfaces;
 using LombardAPI_NEW.Models;
 using LombardAPI_NEW.Models.DTOs;
 using LombardAPI_NEW.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using System.Text.Json;
 
 namespace LombardAPI_NEW.Services
 {
@@ -14,6 +17,7 @@ namespace LombardAPI_NEW.Services
         private readonly IEmailService _emailService;
         private readonly ILogger<GroupMembershipService> _logger;
 
+
         public GroupMembershipService(
             DataBaseContext context,
             IEmailService emailService,
@@ -22,48 +26,313 @@ namespace LombardAPI_NEW.Services
             _context = context;
             _emailService = emailService;
             _logger = logger;
+
         }
+
+        private string SafeSnippet(string input, int length = 200)
+        {
+            if (string.IsNullOrEmpty(input)) return "NULL/EMPTY";
+            return input.Length <= length ? input : input.Substring(0, length) + "...";
+        }
+
 
         public async Task<AddOrRemoveDLMembershipDTO> GetByDLNameAsync(string dlName)
         {
+            using var scope = _logger.BeginScope("GetByDLNameAsync | DLName: {DLName}", dlName);
+
             try
             {
+                _logger.LogInformation("Method started.");
+
                 if (string.IsNullOrWhiteSpace(dlName))
                 {
+                    _logger.LogWarning("DL name is null or empty.");
                     throw new ArgumentException("DL name cannot be null or empty");
                 }
 
-                string command = $"Get-ADGroupMember -Identity \"{dlName}\"";
+                _logger.LogInformation("Executing Get-ADGroup command.");
 
-                var result = Powershell.RunPowerShell(command);
+                string groupCommand =
+                    $"Get-ADGroup -Identity \"{dlName}\" -Properties ManagedBy | ConvertTo-Json -Depth 5";
+
+                _logger.LogDebug("Group PS Command: {Command}", groupCommand);
+
+                var groupResult = Powershell.RunPowerShell(groupCommand);
+                _logger.LogInformation($"GroupResult from cmd : {groupResult}");
+                groupResult = string.Join("", groupResult.Select(r => r.ToString()));
+
+                _logger.LogDebug(
+                    "Group PS Result Length: {Length}, Snippet: {Snippet}",
+                    groupResult?.Length ?? 0,
+                    SafeSnippet(groupResult)
+                );
+
+                if (string.IsNullOrEmpty(groupResult))
+                {
+                    _logger.LogError("PowerShell returned empty result for Get-ADGroup.");
+                    throw new Exception("Group not found");
+                }
+
+                JsonElement groupJson;
+                try
+                {
+                    groupJson = JsonSerializer.Deserialize<JsonElement>(groupResult);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to deserialize Get-ADGroup JSON.");
+                    throw;
+                }
+
+                if (!groupJson.TryGetProperty("ManagedBy", out var managedByProp))
+                {
+                    _logger.LogWarning("ManagedBy property not found in AD group response.");
+                    return new AddOrRemoveDLMembershipDTO
+                    {
+                        DLName = dlName,
+                        DLOwner = "No Owner Assigned"
+                    };
+                }
+
+                string managedByDn = managedByProp.GetString();
+
+                _logger.LogInformation("ManagedBy DN: {ManagedByDn}", managedByDn);
+
+                if (string.IsNullOrEmpty(managedByDn))
+                {
+                    _logger.LogInformation("ManagedBy DN is empty.");
+                    return new AddOrRemoveDLMembershipDTO
+                    {
+                        DLName = dlName,
+                        DLOwner = "No Owner Assigned"
+                    };
+                }
+
+                _logger.LogInformation("Executing Get-ADUser command.");
+
+                string ownerCommand =
+                    $"Get-ADUser -Identity \"{managedByDn}\" -Properties DisplayName,SamAccountName | " +
+                    "Select-Object DisplayName,SamAccountName | ConvertTo-Json";
+
+                _logger.LogDebug("Owner PS Command: {Command}", ownerCommand);
+
+                var ownerResult = Powershell.RunPowerShell(ownerCommand);
+
+                _logger.LogDebug(
+                    "Owner PS Result Length: {Length}, Snippet: {Snippet}",
+                    ownerResult?.Length ?? 0,
+                    SafeSnippet(ownerResult)
+                );
+
+                if (string.IsNullOrEmpty(ownerResult))
+                {
+                    _logger.LogError("PowerShell returned empty result for Get-ADUser.");
+                    throw new Exception("Owner details not found");
+                }
+
+                JsonElement ownerJson;
+                try
+                {
+                    ownerJson = JsonSerializer.Deserialize<JsonElement>(ownerResult);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to deserialize Get-ADUser JSON.");
+                    throw;
+                }
+
+                string displayName = ownerJson.GetProperty("DisplayName").GetString();
+                string samAccountName = ownerJson.GetProperty("SamAccountName").GetString();
+
+                _logger.LogInformation(
+                    "DL owner resolved successfully. DisplayName: {DisplayName}, SamAccountName: {Sam}",
+                    displayName,
+                    samAccountName
+                );
 
                 return new AddOrRemoveDLMembershipDTO
                 {
                     DLName = dlName,
-                    DLOwner = "Test"
+                    DLOwner = $"{displayName} ({samAccountName})"
                 };
+            }
+            catch (ServiceException)
+            {
+                _logger.LogWarning("ServiceException thrown, rethrowing.");
+                throw;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error fetching DL members for {DLName}", dlName);
-                throw;
+                _logger.LogError(ex, "Unhandled exception in GetByDLNameAsync.");
+                throw new ServiceException("Unable to fetch DL details.", ex);
             }
         }
 
+        public async Task<AddOrRemoveDLMembershipDTO> GetByDLNameCloudAsync(string dlName)
+        {
+            using var scope = _logger.BeginScope("GetByDLNameCloudAsync | DLName: {DLName}", dlName);
+
+            try
+            {
+                _logger.LogInformation("Method started.");
+
+                if (string.IsNullOrWhiteSpace(dlName))
+                {
+                    _logger.LogWarning("DL name is null or empty.");
+                    throw new ArgumentException("DL name cannot be null or empty");
+                }
+
+                // 🔹 DEBUG MODE — return fake data, skip PowerShell
+                if ("y" == "yy")
+                {
+                    _logger.LogWarning("DEBUG MODE enabled. Returning mocked DL owner.");
+                    return new AddOrRemoveDLMembershipDTO
+                    {
+                        DLName = dlName,
+                        DLOwner = "Debug Owner (ILOM00000)"
+                    };
+                }
+
+                /* ===============================
+                   STEP 1: GET AD GROUP
+                ================================*/
+
+                _logger.LogInformation("Executing Get-ADGroup command.");
+
+                string groupCommand =
+                    $"Get-ADGroup -Identity \"{dlName}\" -Properties ManagedBy | ConvertTo-Json -Depth 5";
+
+                _logger.LogDebug("Group PS Command: {Command}", groupCommand);
+
+                var groupResult = Powershell.RunPowerShell(groupCommand);
+
+                _logger.LogDebug(
+                    "Group PS Result Length: {Length}, Snippet: {Snippet}",
+                    groupResult?.Length ?? 0,
+                    SafeSnippet(groupResult)
+                );
+
+                if (string.IsNullOrEmpty(groupResult))
+                {
+                    _logger.LogError("Empty response from Get-ADGroup. Possible AD access or DL not found.");
+                    throw new Exception("Group not found");
+                }
+
+                JsonElement groupJson;
+                try
+                {
+                    groupJson = JsonSerializer.Deserialize<JsonElement>(groupResult);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to deserialize Get-ADGroup JSON.");
+                    throw;
+                }
+
+                if (!groupJson.TryGetProperty("ManagedBy", out var managedByProp))
+                {
+                    _logger.LogWarning("ManagedBy property missing in AD group response.");
+                    return new AddOrRemoveDLMembershipDTO
+                    {
+                        DLName = dlName,
+                        DLOwner = "No Owner Assigned"
+                    };
+                }
+
+                string managedByDn = managedByProp.GetString();
+
+                _logger.LogInformation("ManagedBy DN resolved: {ManagedByDn}", managedByDn);
+
+                if (string.IsNullOrEmpty(managedByDn))
+                {
+                    _logger.LogInformation("ManagedBy DN is empty. DL has no owner.");
+                    return new AddOrRemoveDLMembershipDTO
+                    {
+                        DLName = dlName,
+                        DLOwner = "No Owner Assigned"
+                    };
+                }
+
+                /* ===============================
+                   STEP 2: GET OWNER DETAILS
+                ================================*/
+
+                _logger.LogInformation("Executing Get-ADUser command.");
+
+                string ownerCommand =
+                    $"Get-ADUser -Identity \"{managedByDn}\" -Properties DisplayName,SamAccountName | " +
+                    "Select-Object DisplayName,SamAccountName | ConvertTo-Json";
+
+                _logger.LogDebug("Owner PS Command: {Command}", ownerCommand);
+
+                var ownerResult = Powershell.RunPowerShell(ownerCommand);
+
+                _logger.LogDebug(
+                    "Owner PS Result Length: {Length}, Snippet: {Snippet}",
+                    ownerResult?.Length ?? 0,
+                    SafeSnippet(ownerResult)
+                );
+
+                if (string.IsNullOrEmpty(ownerResult))
+                {
+                    _logger.LogError("Empty response from Get-ADUser. Owner DN may be invalid.");
+                    throw new Exception("Owner details not found");
+                }
+
+                JsonElement ownerJson;
+                try
+                {
+                    ownerJson = JsonSerializer.Deserialize<JsonElement>(ownerResult);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to deserialize Get-ADUser JSON.");
+                    throw;
+                }
+
+                string displayName = ownerJson.GetProperty("DisplayName").GetString();
+                string samAccountName = ownerJson.GetProperty("SamAccountName").GetString();
+
+                _logger.LogInformation(
+                    "DL owner fetched successfully. DisplayName: {DisplayName}, SamAccountName: {Sam}",
+                    displayName,
+                    samAccountName
+                );
+
+                return new AddOrRemoveDLMembershipDTO
+                {
+                    DLName = dlName,
+                    DLOwner = $"{displayName} ({samAccountName})"
+                };
+            }
+            catch (ServiceException)
+            {
+                _logger.LogWarning("ServiceException occurred. Rethrowing.");
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unhandled exception in GetByDLNameCloudAsync.");
+                throw new ServiceException("Unable to fetch DL details.", ex);
+            }
+        }
+
+
+
         public async Task<bool> AddOrRemoveDLMembershipAsync(AddOrRemoveDLMembershipDTO dto)
         {
+            using var scope = _logger.BeginScope(new { dto.DLName, dto.Action });
             try
             {
                 if (dto == null)
-                    throw new ArgumentNullException(nameof(dto));
-
+                    throw new ServiceException("Invalid request payload.");
+                _logger.LogInformation("Saving DL request into DB...");
                 string savedId = await SaveToDB(dto);
 
                 if (string.IsNullOrEmpty(savedId))
-                {
-                    _logger.LogWarning("Failed to save DL request for DL: {DLName}", dto.DLName);
-                    return false;
-                }
+                    throw new ServiceException("Failed to save request in DB.");
+
+                _logger.LogInformation("Sending approval email...");
 
                 string link = $"http://localhost:4200/approval?id={savedId}";
 
@@ -116,17 +385,18 @@ namespace LombardAPI_NEW.Services
                 );
 
                 if (!emailSent)
-                {
-                    _logger.LogError("Email sending failed for DL request - ID: {ApprovalId}", savedId);
-                    return false;
-                }
+                    throw new ServiceException("Failed to send approval email.");
 
                 return true;
             }
+            catch (ServiceException)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error while processing membership update for DL: {DLName}", dto.DLName);
-                return false;
+                _logger.LogError(ex, "Unexpected failure in AddOrRemoveDLMembership.");
+                throw new ServiceException("Membership update failed.", ex);
             }
         }
 
@@ -134,20 +404,42 @@ namespace LombardAPI_NEW.Services
         {
             try
             {
-                var dl = new DL
+                DL dl = null;
+                if (dto.Source == "OnPrem")
                 {
-                    ApprovalID = Guid.NewGuid().ToString(),
-                    Event = "Membership",
-                    DLName = dto.DLName,
-                    DLOWner = dto.DLOwner,
-                    Action = dto.Action,
-                    EmpIds = dto.EmpIds,
-                    Rights = "",
-                    IsLocked = false,
-                    CreatedTime = DateTime.UtcNow,
-                    ApprovalStatus = "Pending",
-                    ApproverEmail = ""
-                };
+                     dl = new DL
+                    {
+                        ApprovalID = Guid.NewGuid().ToString(),
+                        Event = "Membership | OnPrem",
+                        DLName = dto.DLName,
+                        DLOWner = dto.DLOwner,
+                        Action = dto.Action,
+                        EmpIds = dto.EmpIds,
+                        Rights = "",
+                        IsLocked = false,
+                        CreatedTime = DateTime.UtcNow,
+                        ApprovalStatus = "Pending",
+                        ApproverEmail = ""
+                    };
+                }
+                else if (dto.Source == "Cloud")
+                {
+                    dl = new DL
+                    {
+                        ApprovalID = Guid.NewGuid().ToString(),
+                        Event = "Membership | Cloud",
+                        DLName = dto.DLName,
+                        DLOWner = dto.DLOwner,
+                        Action = dto.Action,
+                        EmpIds = dto.EmpIds,
+                        Rights = "",
+                        IsLocked = false,
+                        CreatedTime = DateTime.UtcNow,
+                        ApprovalStatus = "Pending",
+                        ApproverEmail = ""
+                    };
+                }
+               
 
                 await _context.DLDetails.AddAsync(dl);
                 await _context.SaveChangesAsync();
