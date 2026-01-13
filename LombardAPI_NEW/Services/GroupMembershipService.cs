@@ -52,8 +52,7 @@ namespace LombardAPI_NEW.Services
 
                 _logger.LogInformation("Executing Get-ADGroup command.");
 
-                string groupCommand =
-                    $"Get-ADGroup -Identity \"{dlName}\" -Properties ManagedBy | ConvertTo-Json -Depth 5";
+                string groupCommand = $"Get-ADGroup -Identity \"{dlName}\" -Properties ManagedBy | ConvertTo-Json -Depth 5";
 
                 _logger.LogDebug("Group PS Command: {Command}", groupCommand);
 
@@ -111,7 +110,7 @@ namespace LombardAPI_NEW.Services
                 _logger.LogInformation("Executing Get-ADUser command.");
 
                 string ownerCommand =
-                    $"Get-ADUser -Identity \"{managedByDn}\" -Properties DisplayName,SamAccountName | " +
+    $"Get-ADUser -Identity \"{managedByDn}\" -Properties DisplayName,SamAccountName | " +
                     "Select-Object DisplayName,SamAccountName | ConvertTo-Json";
 
                 _logger.LogDebug("Owner PS Command: {Command}", ownerCommand);

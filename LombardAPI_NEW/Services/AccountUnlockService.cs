@@ -22,10 +22,7 @@ namespace LombardAPI_NEW.Services
 
         public async Task<AccountUnlockResponseDTO> GetUserDetailsAsync(string employeeId)
         {
-            var psCmd = $@"
-Get-ADUser -Identity {employeeId} 
--Properties Enabled,LockedOut,AccountExpirationDate,PasswordExpired,info |
-Select SamAccountName,Enabled,LockedOut,PasswordExpired,AccountExpirationDate,info";
+            var psCmd = $@"Get-ADUser -Identity {employeeId} -Properties Enabled,LockedOut,AccountExpirationDate,PasswordExpired,info | Select SamAccountName,Enabled,LockedOut,PasswordExpired,AccountExpirationDate,info";
 
             var json = Powershell.RunPowerShell(psCmd);
 

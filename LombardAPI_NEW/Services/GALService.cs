@@ -101,6 +101,7 @@ namespace LombardAPI_NEW.Services
 
         private string BuildGALSearchCommand(GALSearchEnum parameter, string value)
         {
+            ///For UAT - Get-ADUser -Filter "SamAccountName -eq 'ilom40106'" -Server 172.30.48.159 -Properties *
             return parameter switch
             {
                 GALSearchEnum.EmpId =>
