@@ -1,9 +1,11 @@
 ﻿using LombardAPI_NEW.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace LombardAPI_NEW.Controllers
 {
+    [AllowAnonymous]
     [Route("api/[controller]")]
     [ApiController]
     public class ApprovalController : ControllerBase
@@ -30,7 +32,7 @@ namespace LombardAPI_NEW.Controllers
         }
 
 
-        [HttpGet("approve/{id}")]
+        [HttpPost("approve/{id}")]
         public async Task<IActionResult> Approve(string id)
         {
             var req = await _approvalService.Approveasync(id);
@@ -44,7 +46,7 @@ namespace LombardAPI_NEW.Controllers
             }
             
         }
-        [HttpGet("reject/{id}")]
+        [HttpPost("reject/{id}")]
         public async Task<IActionResult> Reject(string id)
         {
            var req =  await _approvalService.Rejectasync(id);

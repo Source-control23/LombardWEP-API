@@ -4,6 +4,7 @@ using LombardAPI_NEW.Models;
 using LombardAPI_NEW.Models.DTOs;
 using LombardAPI_NEW.Shared;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using System.Text.Json;
 
 namespace LombardAPI_NEW.Services
@@ -12,21 +13,27 @@ namespace LombardAPI_NEW.Services
     {
         private readonly DataBaseContext _context;
         private readonly IEmailService _emailService;
+        private readonly PowerShellCommandSettings _cmd;
 
-        public AccountUnlockService(DataBaseContext context, IEmailService emailService)
+        public AccountUnlockService(DataBaseContext context, IEmailService emailService, IOptions<PowerShellCommandSettings> options)
         {
             _context = context;
             _emailService = emailService;
+            _cmd = options.Value;
         }
 
 
         public async Task<AccountUnlockResponseDTO> GetUserDetailsAsync(string employeeId)
         {
-            var psCmd = $@"Get-ADUser -Identity {employeeId} -Properties Enabled,LockedOut,AccountExpirationDate,PasswordExpired,info | Select SamAccountName,Enabled,LockedOut,PasswordExpired,AccountExpirationDate,info";
+            //_cmd.Membership.OnPrem.Add
+            //var psCmd = $@"Get-ADUser -Identity {employeeId} -Properties Enabled,LockedOut,AccountExpirationDate,PasswordExpired,info | Select SamAccountName,Enabled,LockedOut,PasswordExpired,AccountExpirationDate,info";
+            var psCmd = _cmd.AccountUnlock.Verify
+                .Replace("{EmpId}", employeeId);
 
             var json = Powershell.RunPowerShell(psCmd);
 
             if (string.IsNullOrWhiteSpace(json))
+
                 return null;
 
             var user = JsonSerializer.Deserialize<JsonElement>(json);
@@ -35,7 +42,7 @@ namespace LombardAPI_NEW.Services
             {
                 EmployeeId = user.GetProperty("SamAccountName").ToString(),
                 IsLocked = bool.Parse(user.GetProperty("LockedOut").ToString()),
-                Message = user.GetProperty("info").ToString()
+                //Message = user.GetProperty("info").ToString()
             };
         }
 
@@ -72,8 +79,9 @@ namespace LombardAPI_NEW.Services
         public async Task<ApiResponse> UnlockAccountAsync(AccountUnlockRequestDTO request)
         {
             // 1️⃣ Unlock AD
-            var unlockCmd = $"Unlock-ADAccount -Identity {request.EmployeeId}";
-            Powershell.RunPowerShell(unlockCmd);
+            //var unlockCmd = _cmd.AccountUnlock.Unlock.Replace("{EmpId}", request.EmployeeId); ;
+            //var unlockCmd = $"Unlock-ADAccount -Identity {request.EmployeeId}";
+            //Powershell.RunPowerShell(unlockCmd);
 
             // 2️⃣ Save audit
             var approvalId = await SaveToDB(request);

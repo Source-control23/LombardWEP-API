@@ -35,20 +35,22 @@ builder.Services.AddAuthorization();
 builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddFluentValidationClientsideAdapters();
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
-builder.Services.AddLombardServices();
+builder.Services.AddLombardServices(builder.Configuration);
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAll", policy =>
+    options.AddPolicy("UATPolicy", policy =>
     {
-        policy.AllowAnyOrigin()
-              .AllowAnyMethod()
-              .AllowAnyHeader();
+        policy.WithOrigins("http://localhost:4200")
+              .AllowAnyHeader()
+              .AllowAnyMethod();
     });
 });
+
+
 var app = builder.Build();
 
 app.UseSwagger();
@@ -58,7 +60,7 @@ app.UseSwaggerUI();
 
 app.UseRouting();
 
-app.UseCors("AllowAll");
+app.UseCors("UATPolicy");
 
 app.UseAuthorization();
 

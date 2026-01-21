@@ -4,6 +4,7 @@ using LombardAPI_NEW.Interfaces;
 using LombardAPI_NEW.Models;
 using LombardAPI_NEW.Models.DTOs;
 using LombardAPI_NEW.Shared;
+using Microsoft.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -16,16 +17,17 @@ namespace LombardAPI_NEW.Services
         private readonly DataBaseContext _context;
         private readonly IEmailService _emailService;
         private readonly ILogger<GroupMembershipService> _logger;
-
+        private readonly PowerShellCommandSettings _cmd;
 
         public GroupMembershipService(
             DataBaseContext context,
             IEmailService emailService,
-            ILogger<GroupMembershipService> logger)
+            ILogger<GroupMembershipService> logger, IOptions<PowerShellCommandSettings> options)
         {
             _context = context;
             _emailService = emailService;
             _logger = logger;
+            _cmd = options.Value;
 
         }
 
@@ -52,7 +54,8 @@ namespace LombardAPI_NEW.Services
 
                 _logger.LogInformation("Executing Get-ADGroup command.");
 
-                string groupCommand = $"Get-ADGroup -Identity \"{dlName}\" -Properties ManagedBy | ConvertTo-Json -Depth 5";
+                string groupCommand = _cmd.Membership.OnPrem.Get.Replace("{dlName}", dlName);
+               // string groupCommand = $"Get-ADGroup -Identity \"{dlName}\" -Properties ManagedBy | ConvertTo-Json -Depth 5";
 
                 _logger.LogDebug("Group PS Command: {Command}", groupCommand);
 
@@ -109,9 +112,10 @@ namespace LombardAPI_NEW.Services
 
                 _logger.LogInformation("Executing Get-ADUser command.");
 
-                string ownerCommand =
-    $"Get-ADUser -Identity \"{managedByDn}\" -Properties DisplayName,SamAccountName | " +
-                    "Select-Object DisplayName,SamAccountName | ConvertTo-Json";
+                string ownerCommand = _cmd.Membership.OnPrem.ManagedBy.Replace("{managedByDn}", managedByDn);
+    //            string ownerCommand =
+    //$"Get-ADUser -Identity \"{managedByDn}\" -Properties DisplayName,SamAccountName | " +
+    //                "Select-Object DisplayName,SamAccountName | ConvertTo-Json";
 
                 _logger.LogDebug("Owner PS Command: {Command}", ownerCommand);
 
@@ -198,8 +202,9 @@ namespace LombardAPI_NEW.Services
 
                 _logger.LogInformation("Executing Get-ADGroup command.");
 
-                string groupCommand =
-                    $"Get-ADGroup -Identity \"{dlName}\" -Properties ManagedBy | ConvertTo-Json -Depth 5";
+                string groupCommand = _cmd.Membership.Cloud.Get.Replace("{dlName}", dlName);
+                //string groupCommand =
+                //    $"Get-ADGroup -Identity \"{dlName}\" -Properties ManagedBy | ConvertTo-Json -Depth 5";
 
                 _logger.LogDebug("Group PS Command: {Command}", groupCommand);
 
@@ -258,9 +263,10 @@ namespace LombardAPI_NEW.Services
 
                 _logger.LogInformation("Executing Get-ADUser command.");
 
-                string ownerCommand =
-                    $"Get-ADUser -Identity \"{managedByDn}\" -Properties DisplayName,SamAccountName | " +
-                    "Select-Object DisplayName,SamAccountName | ConvertTo-Json";
+                string ownerCommand = _cmd.Membership.Cloud.ManagedBy.Replace("{managedByDn}", managedByDn);
+                //string ownerCommand =
+                //    $"Get-ADUser -Identity \"{managedByDn}\" -Properties DisplayName,SamAccountName | " +
+                //    "Select-Object DisplayName,SamAccountName | ConvertTo-Json";
 
                 _logger.LogDebug("Owner PS Command: {Command}", ownerCommand);
 

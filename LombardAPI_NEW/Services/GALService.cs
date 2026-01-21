@@ -1,8 +1,10 @@
 ﻿using LombardAPI_NEW.Extensions;
 using LombardAPI_NEW.Interfaces;
+using LombardAPI_NEW.Models;
 using LombardAPI_NEW.Models.DTOs;
 using LombardAPI_NEW.Models.Enums;
 using LombardAPI_NEW.Shared;
+using Microsoft.Extensions.Options;
 using System.Text.Json;
 
 namespace LombardAPI_NEW.Services
@@ -10,10 +12,12 @@ namespace LombardAPI_NEW.Services
     public class GALService : IGAL
     {
         private readonly ILogger<GALService> _logger;
+        private readonly PowerShellCommandSettings _cmd;
 
-        public GALService(ILogger<GALService> logger)
+        public GALService(ILogger<GALService> logger, IOptions<PowerShellCommandSettings> options)
         {
             _logger = logger;
+            _cmd = options.Value;
         }
 
         public async Task<GALSearchResponseDTO> SearchAsync(GALSearchEnum parameter, string value)
@@ -101,27 +105,22 @@ namespace LombardAPI_NEW.Services
 
         private string BuildGALSearchCommand(GALSearchEnum parameter, string value)
         {
-            ///For UAT - Get-ADUser -Filter "SamAccountName -eq 'ilom40106'" -Server 172.30.48.159 -Properties *
-            return parameter switch
+            string template = parameter switch
             {
-                GALSearchEnum.EmpId =>
-                    $"Get-ADUser -Filter {{ SamAccountName -like \"*{value}*\" }} -Properties *",
-
-                GALSearchEnum.FirstName =>
-                    $"Get-ADUser -Filter {{ GivenName -like \"*{value}*\" }} -Properties *",
-
-                GALSearchEnum.LastName =>
-                    $"Get-ADUser -Filter {{ Surname -like \"*{value}*\" }} -Properties *",
-
-                GALSearchEnum.Mail =>
-                    $"Get-ADUser -Filter {{ Mail -like \"*{value}*\" }} -Properties *",
-
-                GALSearchEnum.DisplayName =>
-                    $"Get-ADUser -Filter {{ DisplayName -like \"*{value}*\" }} -Properties *",
-
+                GALSearchEnum.EmpId => _cmd.GAL.EmpId,
+                GALSearchEnum.FirstName => _cmd.GAL.FirstName,
+                GALSearchEnum.LastName => _cmd.GAL.LastName,
+                GALSearchEnum.Mail => _cmd.GAL.Mail,
+                GALSearchEnum.DisplayName => _cmd.GAL.DisplayName,
                 _ => throw new ArgumentException("Invalid GAL search parameter")
             };
+
+            if (string.IsNullOrWhiteSpace(template))
+                throw new InvalidOperationException($"GAL PowerShell command not configured for {parameter}");
+
+            return template.Replace("{Value}", value);
         }
+
         private string SafeSnippet(string input, int length = 200)
         {
             if (string.IsNullOrEmpty(input))

@@ -2,6 +2,7 @@
 using LombardAPI_NEW.Interfaces;
 using LombardAPI_NEW.Models;
 using LombardAPI_NEW.Models.DTOs;
+using Microsoft.Extensions.Options;
 
 namespace LombardAPI_NEW.Services
 {
@@ -10,15 +11,17 @@ namespace LombardAPI_NEW.Services
         private readonly DataBaseContext _context;
         private readonly IEmailService _emailService;
         private readonly ILogger<RightsManagementService> _logger;
+        private readonly PowerShellCommandSettings _cmd;
 
         public RightsManagementService(
             DataBaseContext context,
             IEmailService emailService,
-            ILogger<RightsManagementService> logger)
+            ILogger<RightsManagementService> logger, IOptions<PowerShellCommandSettings> options)
         {
             _context = context;
             _emailService = emailService;
             _logger = logger;
+            _cmd = options.Value;
         }
 
         public async Task<bool> AddOrRemoveRightsAsync(AddOrRemoveRightsDTO dto)

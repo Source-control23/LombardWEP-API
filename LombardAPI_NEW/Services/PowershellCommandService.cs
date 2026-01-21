@@ -1,11 +1,19 @@
 ﻿using LombardAPI_NEW.Models;
 using LombardAPI_NEW.Shared;
+using Microsoft.Extensions.Options;
 using System.Text.Json;
 
 namespace LombardAPI_NEW.Services
 {
-    public class PowershellCommandService
+  public class PowershellCommandService
     {
+        private readonly PowerShellCommandSettings _cmd;
+
+        public PowershellCommandService(IOptions<PowerShellCommandSettings> options)
+        {
+            _cmd = options.Value;
+        }
+
         public void GroupMembershipCommand(DL req)
         {
             if (string.IsNullOrWhiteSpace(req.DLName) || string.IsNullOrWhiteSpace(req.EmpIds))
@@ -15,81 +23,74 @@ namespace LombardAPI_NEW.Services
 
             foreach (var user in users)
             {
-                string psCmd = "";
+                string template = req.Event switch
+                {
+                    "Membership | OnPrem" => req.Action == "Add"
+                        ? _cmd.Membership.OnPrem.Add
+                        : _cmd.Membership.OnPrem.Remove,
 
-                if (req.Event == "Membership | OnPrem")
-                {
-                    psCmd = req.Action == "Add"
-                        ? $"Add-ADGroupMember -Identity \"{req.DLName}\" -Members \"{user.Trim()}\""
-                        : $"Remove-ADGroupMember -Identity \"{req.DLName}\" -Members \"{user.Trim()}\" -Confirm:$false";
-                }
-                else if (req.Event == "Membership | Cloud")
-                {
-                    psCmd = req.Action == "Add"
-                        ? $"Add-DistributionGroupMember -Identity \"{req.DLName}\" -Member \"{user.Trim()}@icicilombard.com\" -Confirm:$false"
-                        : $"Remove-DistributionGroupMember -Identity \"{req.DLName}\" -Member \"{user.Trim()}@icicilombard.com\" -Confirm:$false";
-                }
+                    "Membership | Cloud" => req.Action == "Add"
+                        ? _cmd.Membership.Cloud.Add
+                        : _cmd.Membership.Cloud.Remove,
+
+                    _ => throw new InvalidOperationException("Invalid Membership Event")
+                };
+
+                string psCmd = template
+                    .Replace("{DLName}", req.DLName)
+                    .Replace("{User}", user.Trim());
 
                 Powershell.RunPowerShell(psCmd);
             }
         }
-
-
 
         public void RightsManagementCommand(DL req)
         {
             if (string.IsNullOrWhiteSpace(req.DLName) || string.IsNullOrWhiteSpace(req.Rights))
                 throw new ArgumentException("DLName and Rights are required.");
 
-            string psCmd = "";
+            string template = req.Event switch
+            {
+                "Rights | OnPrem" => req.Action == "Add"
+                    ? _cmd.Rights.OnPrem.Add
+                    : _cmd.Rights.OnPrem.Remove,
 
-            if (req.Event == "Rights | OnPrem")
-            {
-                psCmd = req.Action == "Add"
-                    ? $"Set-DistributionGroup -Identity \"{req.DLName}\" -AcceptMessagesOnlyFrom @{{Add=\"{req.Rights}\"}}"
-                    : $"Set-DistributionGroup -Identity \"{req.DLName}\" -AcceptMessagesOnlyFrom @{{Remove=\"{req.Rights}\"}}";
-            }
-            else if (req.Event == "Rights | Cloud")
-            {
-                psCmd = req.Action == "Add"
-                    ? $@"
-$group = Get-AzureADGroup -SearchString ""{req.DLName}""
-$user  = Get-AzureADUser -ObjectId ""{req.Rights}""
-Add-AzureADGroupMember -ObjectId $group.ObjectId -RefObjectId $user.ObjectId"
-                    : $@"
-$group = Get-AzureADGroup -SearchString ""{req.DLName}""
-$user  = Get-AzureADUser -ObjectId ""{req.Rights}""
-Remove-AzureADGroupMember -ObjectId $group.ObjectId -MemberId $user.ObjectId";
-            }
+                "Rights | Cloud" => req.Action == "Add"
+                    ? _cmd.Rights.Cloud.Add
+                    : _cmd.Rights.Cloud.Remove,
+
+                _ => throw new InvalidOperationException("Invalid Rights Event")
+            };
+
+            string psCmd = template
+                .Replace("{DLName}", req.DLName)
+                .Replace("{Rights}", req.Rights);
 
             Powershell.RunPowerShell(psCmd);
         }
 
-
         public void AccountUnlockCommand(DL req)
         {
             if (string.IsNullOrWhiteSpace(req.EmpIds))
-                throw new ArgumentException("EmployeeId is required for account unlock.");
+                throw new ArgumentException("EmployeeId is required.");
 
-            string unlockCmd = $"Unlock-ADAccount -Identity \"{req.EmpIds}\"";
+            string unlockCmd = _cmd.AccountUnlock.Unlock
+                .Replace("{EmpId}", req.EmpIds);
+
             Powershell.RunPowerShell(unlockCmd);
 
-            string verifyCmd = $@"
-Get-ADUser -Identity ""{req.EmpIds}"" -Properties LockedOut |
-Select SamAccountName, LockedOut | ConvertTo-Json";
+            string verifyCmd = _cmd.AccountUnlock.Verify
+                .Replace("{EmpId}", req.EmpIds);
 
             var resultJson = Powershell.RunPowerShell(verifyCmd);
 
             if (!string.IsNullOrWhiteSpace(resultJson))
             {
                 var user = JsonSerializer.Deserialize<JsonElement>(resultJson);
-                bool isLocked = user.GetProperty("LockedOut").GetBoolean();
-
-                if (isLocked)
+                if (user.GetProperty("LockedOut").GetBoolean())
                     throw new Exception("Account unlock failed. User is still locked.");
             }
         }
-
-
     }
+
 }
