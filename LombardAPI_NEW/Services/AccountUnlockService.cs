@@ -14,37 +14,101 @@ namespace LombardAPI_NEW.Services
         private readonly DataBaseContext _context;
         private readonly IEmailService _emailService;
         private readonly PowerShellCommandSettings _cmd;
+        private readonly ILogger<AccountUnlockService> _logger;
+        private readonly CommonService _commonService;
 
-        public AccountUnlockService(DataBaseContext context, IEmailService emailService, IOptions<PowerShellCommandSettings> options)
+        public AccountUnlockService(CommonService commonService, DataBaseContext context,IEmailService emailService,IOptions<PowerShellCommandSettings> options,ILogger<AccountUnlockService> logger)
         {
             _context = context;
             _emailService = emailService;
             _cmd = options.Value;
+            _logger = logger;
+            _commonService = commonService;
         }
+
 
 
         public async Task<AccountUnlockResponseDTO> GetUserDetailsAsync(string employeeId)
         {
-            //_cmd.Membership.OnPrem.Add
-            //var psCmd = $@"Get-ADUser -Identity {employeeId} -Properties Enabled,LockedOut,AccountExpirationDate,PasswordExpired,info | Select SamAccountName,Enabled,LockedOut,PasswordExpired,AccountExpirationDate,info";
-            var psCmd = _cmd.AccountUnlock.Verify
-                .Replace("{EmpId}", employeeId);
+            using var scope = _logger.BeginScope(
+                "AccountUnlock | EmployeeId: {EmployeeId}", employeeId);
 
-            var json = Powershell.RunPowerShell(psCmd);
+            var psCmd = _cmd.AccountUnlock.Verify.Replace("{EmpId}", employeeId);
+            _logger.LogInformation("Executing AccountUnlock verification command.");
+            _logger.LogDebug("PowerShell Command: {Command}", psCmd);
 
-            if (string.IsNullOrWhiteSpace(json))
-
+            string output;
+            try
+            {
+                output = Powershell.RunPowerShell(psCmd);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "PowerShell execution failed.");
                 return null;
+            }
 
-            var user = JsonSerializer.Deserialize<JsonElement>(json);
+            _logger.LogDebug(
+                "PowerShell output length: {Length}, snippet: {Snippet}",
+                output?.Length ?? 0,
+                output?.Length > 200 ? output.Substring(0, 200) : output
+            );
+
+            if (string.IsNullOrWhiteSpace(output))
+            {
+                _logger.LogWarning("Empty PowerShell output.");
+                return null;
+            }
+
+            if (!LooksLikeJson(output))
+            {
+                _logger.LogError("PowerShell output is not JSON. Output: {Output}", output);
+                return null;
+            }
+
+            if (!TryParseUser(output, out var user))
+            {
+                _logger.LogError("Failed to parse JSON from PowerShell output.");
+                return null;
+            }
+
+            if (!user.TryGetProperty("SamAccountName", out var samProp))
+            {
+                _logger.LogError("SamAccountName missing. Full JSON: {Json}", user.ToString());
+                return null;
+            }
+
+            if (!user.TryGetProperty("LockedOut", out var lockedProp))
+            {
+                _logger.LogError("LockedOut property missing. Full JSON: {Json}", user.ToString());
+                return null;
+            }
+
+            bool locked = lockedProp.ValueKind switch
+            {
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                _ when bool.TryParse(lockedProp.ToString(), out var parsed) => parsed,
+                _ => false
+            };
+
+            _logger.LogInformation(
+                "Account status resolved. SamAccountName: {Sam}, Locked: {Locked}",
+                samProp.GetString(), locked);
 
             return new AccountUnlockResponseDTO
             {
-                EmployeeId = user.GetProperty("SamAccountName").ToString(),
-                IsLocked = bool.Parse(user.GetProperty("LockedOut").ToString()),
-                //Message = user.GetProperty("info").ToString()
+                EmployeeId = samProp.GetString() ?? string.Empty,
+                IsLocked = locked
             };
         }
+
+        private bool LooksLikeJson(string input)
+        {
+            var trimmed = input.TrimStart();
+            return trimmed.StartsWith("{") || trimmed.StartsWith("[");
+        }
+
 
         public async Task<string> SaveToDB(AccountUnlockRequestDTO dto)
         {
@@ -78,18 +142,13 @@ namespace LombardAPI_NEW.Services
 
         public async Task<ApiResponse> UnlockAccountAsync(AccountUnlockRequestDTO request)
         {
-            // 1️⃣ Unlock AD
-            //var unlockCmd = _cmd.AccountUnlock.Unlock.Replace("{EmpId}", request.EmployeeId); ;
-            //var unlockCmd = $"Unlock-ADAccount -Identity {request.EmployeeId}";
-            //Powershell.RunPowerShell(unlockCmd);
-
             // 2️⃣ Save audit
             var approvalId = await SaveToDB(request);
             if (string.IsNullOrEmpty(approvalId))
                 return ApiResponse.Fail("Failed to save approval request.");
 
             // 3️⃣ Send mail
-            var link = $"http://localhost:4200/approval?id={approvalId}";
+            var link = $"{_commonService.GetEmailBaseUrl()}approval?id={approvalId}";
             var mailSent = await _emailService.SendEmailAsync(
                 "",
                 "Unlock Lock Account Request",
@@ -151,9 +210,19 @@ namespace LombardAPI_NEW.Services
   </div>";
         }
 
-
-
-
-
+        private bool TryParseUser(string json, out JsonElement element)
+        {
+            element = default;
+            try
+            {
+                element = JsonSerializer.Deserialize<JsonElement>(json);
+                return element.ValueKind != JsonValueKind.Undefined &&
+                       element.ValueKind != JsonValueKind.Null;
+            }
+            catch
+            {
+                return false;
+            }
+        }
     }
 }

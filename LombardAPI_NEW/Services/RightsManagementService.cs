@@ -12,8 +12,9 @@ namespace LombardAPI_NEW.Services
         private readonly IEmailService _emailService;
         private readonly ILogger<RightsManagementService> _logger;
         private readonly PowerShellCommandSettings _cmd;
+        private readonly CommonService _commonService;
 
-        public RightsManagementService(
+        public RightsManagementService(CommonService commonService,
             DataBaseContext context,
             IEmailService emailService,
             ILogger<RightsManagementService> logger, IOptions<PowerShellCommandSettings> options)
@@ -22,6 +23,7 @@ namespace LombardAPI_NEW.Services
             _emailService = emailService;
             _logger = logger;
             _cmd = options.Value;
+            _commonService = commonService;
         }
 
         public async Task<bool> AddOrRemoveRightsAsync(AddOrRemoveRightsDTO dto)
@@ -36,7 +38,7 @@ namespace LombardAPI_NEW.Services
                     return false;
                 }
 
-                string link = $"http://localhost:4200/approval?id={approvalId}";
+                string link = $"{_commonService.GetEmailBaseUrl()}approval?id={approvalId}";
 
                 string body = $@"
 <div style='font-family:Segoe UI,Arial,sans-serif; font-size:14px; color:#333; line-height:1.6;'>

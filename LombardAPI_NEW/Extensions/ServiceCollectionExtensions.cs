@@ -19,6 +19,7 @@ namespace LombardAPI_NEW.Extensions
             services.AddScoped<IApproval, ApprovalService>();
             services.AddScoped<IGAL, GALService>();
             services.AddScoped<PowershellCommandService>();
+            services.AddScoped<CommonService>();
 
             // ✅ Correct way
             services.Configure<PowerShellCommandSettings>(

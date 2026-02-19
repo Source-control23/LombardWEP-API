@@ -1,4 +1,5 @@
-﻿namespace LombardAPI_NEW.Models.DTOs
+﻿
+namespace LombardAPI_NEW.Models.DTOs
 {
     public class GALSearchResponseDTO
     {
@@ -43,5 +44,10 @@
         public string? State { get; set; }
         public string? ZipCode { get; set; }
         public string? Country { get; set; }
+
+        public static explicit operator GALSearchResponseDTO(List<GALSearchResponseDTO> v)
+        {
+            throw new NotImplementedException();
+        }
     }
 }

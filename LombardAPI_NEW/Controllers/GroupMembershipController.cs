@@ -16,6 +16,8 @@ public class GroupMembershipController : ControllerBase
         _service = service;
         _logger = logger;
     }
+
+
     [HttpGet("{dlName}")]
     public async Task<IActionResult> GetMembers(string dlName, [FromQuery] string source)
     {
@@ -98,4 +100,11 @@ public class GroupMembershipController : ControllerBase
             return StatusCode(500, ApiResponse.Fail("Unexpected internal error."));
         }
     }
+    [HttpGet("TestDB")]
+    public async Task<IActionResult> TestDB()
+    {
+        var res = await _service.TestDBConnectionAsync();
+        return Ok(res);
+    }
+
 }

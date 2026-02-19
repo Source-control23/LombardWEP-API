@@ -23,7 +23,11 @@ namespace LombardAPI_NEW.Controllers
             var user = await _service.GetUserDetailsAsync(employeeId);
 
             if (user == null)
-                return NotFound(ApiResponse.Fail("User not found in AD"));
+            {
+                return NotFound(ApiResponse.Fail(
+                    $"User {employeeId} not found or PowerShell failed."
+                ));
+            }
 
             return Ok(ApiResponse.Ok(user));
         }

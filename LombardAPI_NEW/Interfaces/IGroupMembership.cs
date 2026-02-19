@@ -7,5 +7,6 @@ namespace LombardAPI_NEW.Interfaces
         Task<AddOrRemoveDLMembershipDTO> GetByDLNameAsync(string dlName);
         Task<AddOrRemoveDLMembershipDTO> GetByDLNameCloudAsync(string dlName);
         Task<bool> AddOrRemoveDLMembershipAsync(AddOrRemoveDLMembershipDTO dto);
+        Task<string> TestDBConnectionAsync();
     }
 }

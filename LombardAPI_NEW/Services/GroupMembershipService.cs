@@ -18,8 +18,9 @@ namespace LombardAPI_NEW.Services
         private readonly IEmailService _emailService;
         private readonly ILogger<GroupMembershipService> _logger;
         private readonly PowerShellCommandSettings _cmd;
+        private readonly CommonService _commonService;
 
-        public GroupMembershipService(
+        public GroupMembershipService(CommonService commonService,
             DataBaseContext context,
             IEmailService emailService,
             ILogger<GroupMembershipService> logger, IOptions<PowerShellCommandSettings> options)
@@ -28,6 +29,7 @@ namespace LombardAPI_NEW.Services
             _emailService = emailService;
             _logger = logger;
             _cmd = options.Value;
+            _commonService = commonService;
 
         }
 
@@ -186,7 +188,7 @@ namespace LombardAPI_NEW.Services
                 }
 
                 // 🔹 DEBUG MODE — return fake data, skip PowerShell
-                if ("y" == "yy")
+                if ("1y" == "y")
                 {
                     _logger.LogWarning("DEBUG MODE enabled. Returning mocked DL owner.");
                     return new AddOrRemoveDLMembershipDTO
@@ -323,6 +325,71 @@ namespace LombardAPI_NEW.Services
         }
 
 
+        public async Task<string> TestDBConnectionAsync()
+        {
+            try
+            {
+                // STEP 1 — Open connection
+                _logger.LogInformation("STEP 1 → Opening DB connection...");
+
+                if (_context.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+                    await _context.Database.OpenConnectionAsync();
+
+                _logger.LogInformation("✅ Connection opened successfully");
+
+
+                // STEP 2 — Simple SELECT test
+                _logger.LogInformation("STEP 2 → Running SELECT test...");
+
+                var testValue = await _context.DLDetails
+                                              .AsNoTracking()
+                                              .Select(x => x.ApprovalID)
+                                              .FirstOrDefaultAsync();
+
+                _logger.LogInformation("✅ SELECT query successful");
+
+
+                // STEP 3 — INSERT test record
+                _logger.LogInformation("STEP 3 → Preparing INSERT test record...");
+
+                var testRecord = new DL
+                {
+                    ApprovalID = Guid.NewGuid().ToString(),
+                    Event = "DB_TEST",
+                    DLName = "TEST_CONNECTION",
+                    DLOWner = "SYSTEM",
+                    Action = "TEST",
+                    EmpIds = "TEST",
+                    Rights = "",
+                    IsLocked = false,
+                    CreatedTime = DateTime.UtcNow,
+                    ApprovalStatus = "Test",
+                    ApproverEmail = ""
+                };
+
+
+                _logger.LogInformation("STEP 4 → Adding entity...");
+                await _context.DLDetails.AddAsync(testRecord);
+
+
+                // STEP 4 — SaveChanges test
+                _logger.LogInformation("STEP 5 → Saving to DB...");
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("✅ INSERT successful. ApprovalID: {Id}", testRecord.ApprovalID);
+
+
+                return $"SUCCESS ✅ | Connection + Read + Write working | TestID: {testRecord.ApprovalID}";
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ DB TEST FAILED");
+
+                return $"FAILED ❌ | {ex.GetType().Name} | {ex.Message}";
+            }
+        }
+
+
 
         public async Task<bool> AddOrRemoveDLMembershipAsync(AddOrRemoveDLMembershipDTO dto)
         {
@@ -339,7 +406,7 @@ namespace LombardAPI_NEW.Services
 
                 _logger.LogInformation("Sending approval email...");
 
-                string link = $"http://localhost:4200/approval?id={savedId}";
+                string link = $"{_commonService.GetEmailBaseUrl()}approval?id={savedId}";
 
                 string body = $@"
   <div style='font-family:Segoe UI,Arial,sans-serif; font-size:14px; color:#333; line-height:1.6;'>

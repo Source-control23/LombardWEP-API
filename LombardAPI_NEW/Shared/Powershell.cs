@@ -11,27 +11,36 @@ namespace LombardAPI_NEW.Shared
 
         public static string RunPowerShell(string command)
         {
-            using (PowerShell ps = PowerShell.Create())
+            using var ps = PowerShell.Create();
+
+            ps.AddScript(@"
+        Set-ExecutionPolicy -Scope Process Bypass -Force;
+        Import-Module ActiveDirectory -ErrorAction Stop;
+    ");
+
+            ps.Invoke();
+            ThrowIfErrors(ps);
+
+            ps.Commands.Clear();
+            ps.AddScript(command);
+
+            var results = ps.Invoke();
+
+            var errors = ps.Streams.Error.Select(e => e.ToString()).ToList();
+            var output = results.Select(r => r.ToString()).ToList();
+
+            if (errors.Any())
             {
-                ps.AddScript(@"
-            Set-ExecutionPolicy -Scope Process Bypass -Force;
-            Import-Module ActiveDirectory -ErrorAction Stop;
-        ");
-
-                ps.Invoke();
-                if (ps.Streams.Error.Count > 0)
-                    throw new Exception(string.Join(";", ps.Streams.Error.Select(e => e.ToString())));
-
-                ps.Commands.Clear();
-
-                ps.AddScript(command);
-
-                var results = ps.Invoke();
-                if (ps.Streams.Error.Count > 0)
-                    throw new Exception(string.Join(";", ps.Streams.Error.Select(e => e.ToString())));
-
-                return string.Join("", results.Select(r => r.ToString()));
+                throw new Exception("PowerShell errors: " + string.Join(" | ", errors));
             }
+
+            return string.Join(Environment.NewLine, output);
+        }
+
+        private static void ThrowIfErrors(PowerShell ps)
+        {
+            if (ps.Streams.Error.Count > 0)
+                throw new Exception(string.Join(" | ", ps.Streams.Error.Select(e => e.ToString())));
         }
 
 
