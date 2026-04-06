@@ -5,6 +5,7 @@ using LombardAPI_NEW.Models.DTOs;
 using LombardAPI_NEW.Models.Enums;
 using LombardAPI_NEW.Shared;
 using Microsoft.Extensions.Options;
+using System.Text;
 using System.Text.Json;
 
 namespace LombardAPI_NEW.Services
@@ -133,9 +134,19 @@ namespace LombardAPI_NEW.Services
                 }
 
                 var psCmd = BuildGALSearchCommand(parameter, value);
-                _logger.LogInformation("Executing GAL PowerShell command.");
-
-                var jsonResult = Powershell.RunPowerShell(psCmd);
+                
+                var jsonResult = string.Empty;
+                for (int i = 0; i < psCmd.Count; i++)
+                {
+                    _logger.LogInformation("Executing GAL PowerShell command. : " + psCmd[i].ToString());
+                    jsonResult = Powershell.RunPowerShell(psCmd[i]);
+                    if(!string.IsNullOrWhiteSpace(jsonResult))
+                    {
+                        break; // stop at first successful result
+                    }
+                    _logger.LogDebug("PowerShell Command [{Index}]: {Command}", i, psCmd[i]);
+                }
+                
 
                 if (string.IsNullOrWhiteSpace(jsonResult))
                 {
@@ -179,27 +190,73 @@ namespace LombardAPI_NEW.Services
             }
         }
 
-        private static GALSearchResponseDTO MapUser(JsonElement adUser)
+
+        private static GALSearchResponseDTO MapUser(JsonElement u)
         {
             return new GALSearchResponseDTO
             {
-                FirstName = adUser.GetPropertyOrDefault("GivenName"),
-                LastName = adUser.GetPropertyOrDefault("Surname"),
-                Display = adUser.GetPropertyOrDefault("DisplayName"),
-                EmpNo = adUser.GetPropertyOrDefault("EmployeeID"),
-                EmailAddress = adUser.GetPropertyOrDefault("Mail"),
-                Mobile = adUser.GetPropertyOrDefault("MobilePhone"),
-                Department = adUser.GetPropertyOrDefault("Department"),
-                Designation = adUser.GetPropertyOrDefault("Title"),
-                Manager = adUser.GetPropertyOrDefault("Manager"),
-                Location = adUser.GetPropertyOrDefault("City"),
-                Company = adUser.GetPropertyOrDefault("Company"),
-                Country = adUser.GetPropertyOrDefault("Country")
+                // Basic
+                FirstName = u.GetPropertyOrDefault("GivenName"),
+                LastName = u.GetPropertyOrDefault("Surname"),
+                Display = u.GetPropertyOrDefault("DisplayName"),
+                Initials = u.GetPropertyOrDefault("Initials"),
+                KnownAs = u.GetPropertyOrDefault("Name"),
+                Grade = u.GetPropertyOrDefault("EmployeeType"),
+                WorkStationID = u.GetPropertyOrDefault("Office"),
+
+                // Employment
+                EmpNo = u.GetPropertyOrDefault("EmployeeID"),
+                Designation = u.GetPropertyOrDefault("Title"),
+                Department = u.GetPropertyOrDefault("Department"),
+                Company = u.GetPropertyOrDefault("Company"),
+                Location = u.GetPropertyOrDefault("City"),
+                Manager = ExtractCommonName(u.GetPropertyOrDefault("Manager")),
+                Group = u.GetPropertyOrDefault("personalPager"),
+                MainGroup = u.GetPropertyOrDefault("personalPager"),
+                CostCenter = u.GetPropertyOrDefault("extensionName"),
+                Region = u.GetPropertyOrDefault("o"),
+
+                // Contact
+                EmailAddress = u.GetPropertyOrDefault("mail"),
+                Mobile = u.GetPropertyOrDefault("MobilePhone"),
+                DirectPhone = u.GetPropertyOrDefault("TelephoneNumber"),
+                BoardNo = u.GetPropertyOrDefault("homePhone"),
+                Fax = u.GetPropertyOrDefault("Fax"),
+                Business = u.GetPropertyOrDefault("IpPhone"),
+                Business2 = u.GetPropertyOrDefault("OtherTelephone"),
+                CountryCode = u.GetPropertyOrDefault("CountryCode"),
+                CityCode = u.GetPropertyOrDefault("HomeMDB"),
+
+                // Address
+                AddressLocation = u.GetPropertyOrDefault("l"),
+                Address = u.GetPropertyOrDefault("StreetAddress"),
+                State = u.GetPropertyOrDefault("State"),
+                ZipCode = u.GetPropertyOrDefault("PostalCode"),
+                Country = u.GetPropertyOrDefault("Country"),
+
+                // Reports
+                DirectReports = u.GetPropertyOrDefault("DirectReports"),
+                Assisted = u.GetPropertyOrDefault("Assistant")
             };
         }
 
-        private string BuildGALSearchCommand(GALSearchEnum parameter, string value)
+        private static string? ExtractCommonName(string? distinguishedName)
         {
+            if (string.IsNullOrWhiteSpace(distinguishedName))
+                return null;
+
+            var match = System.Text.RegularExpressions.Regex.Match(
+                distinguishedName,
+                @"CN=([^,]+)",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            return match.Success ? match.Groups[1].Value : distinguishedName;
+        }
+
+        private List<string> BuildGALSearchCommand(GALSearchEnum parameter, string value)
+        {
+            List<string> result = new List<string>();
+
             string template = parameter switch
             {
                 GALSearchEnum.EmpId => _cmd.GAL.EmpId,
@@ -213,7 +270,20 @@ namespace LombardAPI_NEW.Services
             if (string.IsNullOrWhiteSpace(template))
                 throw new InvalidOperationException($"GAL PowerShell command not configured for {parameter}");
 
-            return template.Replace("{Value}", value);
+            if (_cmd.GAL.SearchBaseOUs == null || !_cmd.GAL.SearchBaseOUs.Any())
+                throw new InvalidOperationException("No GAL SearchBaseOUs configured.");
+
+            var baseCommand = template
+                .Replace("| ConvertTo-Json", "", StringComparison.OrdinalIgnoreCase)
+                .Replace("{Value}", value);
+
+            foreach (var ou in _cmd.GAL.SearchBaseOUs)
+            {
+                var command = $"{baseCommand} -SearchBase \"{ou}\" | Select-Object * | ConvertTo-Json -Depth 4";
+                result.Add(command);
+            }
+
+            return result;
         }
 
         private string SafeSnippet(string input, int length = 200)

@@ -14,7 +14,6 @@ public class EmailService : IEmailService
     private readonly string _fromEmail;
     private readonly string? _toEmail;
     private readonly ILogger<EmailService> _logger;
-
     public EmailService(IConfiguration config, ILogger<EmailService> logger)
     {
         _fromEmail = config["EmailSettings:FromEmail"];
@@ -34,7 +33,6 @@ public class EmailService : IEmailService
         };
 
     }
-
     public async Task<bool> SendEmailAsync(string toEmail, string subject, string bodyHtml)
     {
         try

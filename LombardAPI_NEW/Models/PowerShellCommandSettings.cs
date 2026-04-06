@@ -15,6 +15,7 @@
         public string LastName { get; set; }
         public string Mail { get; set; }
         public string DisplayName { get; set; }
+        public List<string> SearchBaseOUs { get; set; } = new();
     }
     public class MembershipCommands
     {
@@ -30,8 +31,9 @@
 
     public class EnvironmentCommands
     {
-
+        public string ConnectScript { get; set; }
         public string Get { get; set; }
+        public string GetDLWithOwner { get; set; }
         public string ManagedBy { get; set; }
         public string Add { get; set; }
         public string Remove { get; set; }

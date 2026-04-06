@@ -1,7 +1,10 @@
-﻿using LombardAPI_NEW.Models;
+﻿using LombardAPI_NEW.ErrorHandling;
+using LombardAPI_NEW.Models;
+using LombardAPI_NEW.Models.DTOs;
 using LombardAPI_NEW.Shared;
 using Microsoft.Extensions.Options;
 using System.Text.Json;
+using System.Xml.Linq;
 
 namespace LombardAPI_NEW.Services
 {
@@ -9,8 +12,6 @@ namespace LombardAPI_NEW.Services
     {
         private readonly PowerShellCommandSettings _cmd;
         private readonly ILogger<PowershellCommandService> _logger;
-
-
         public PowershellCommandService(
             IOptions<PowerShellCommandSettings> options,
             ILogger<PowershellCommandService> logger)
@@ -18,64 +19,7 @@ namespace LombardAPI_NEW.Services
             _cmd = options.Value;
             _logger = logger;
         }
-
-
-        //public void GroupMembershipCommand(DL req)
-        //{
-        //    using var scope = _logger.BeginScope(
-        //        "GroupMembership | DL: {DL}, Event: {Event}, Action: {Action}",
-        //        req.DLName, req.Event, req.Action);
-
-        //    if (string.IsNullOrWhiteSpace(req.DLName) || string.IsNullOrWhiteSpace(req.EmpIds))
-        //    {
-        //        _logger.LogError("DLName or EmpIds missing.");
-        //        throw new ArgumentException("DLName and EmpIds are required.");
-        //    }
-
-        //    var users = req.EmpIds.Split(',', StringSplitOptions.RemoveEmptyEntries);
-
-        //    _logger.LogInformation("Processing membership for {UserCount} users.", users.Length);
-
-        //    foreach (var user in users)
-        //    {
-        //        string template = req.Event switch
-        //        {
-        //            "Membership | OnPrem" => req.Action == "Add"
-        //                ? _cmd.Membership.OnPrem.Add
-        //                : _cmd.Membership.OnPrem.Remove,
-
-        //            "Membership | Cloud" => req.Action == "Add"
-        //                ? _cmd.Membership.Cloud.Add
-        //                : _cmd.Membership.Cloud.Remove,
-
-        //            _ => throw new InvalidOperationException("Invalid Membership Event")
-        //        };
-
-        //        string psCmd = template
-        //            .Replace("{DLName}", req.DLName)
-        //            .Replace("{User}", user.Trim());
-
-        //        _logger.LogInformation(
-        //            "Executing membership command for user: {User}", user);
-
-        //        _logger.LogDebug("PowerShell Command: {Command}", psCmd);
-
-        //        try
-        //        {
-        //            Powershell.RunPowerShell(psCmd);
-        //            _logger.LogInformation("Membership operation succeeded for user: {User}", user);
-        //        }
-        //        catch (Exception ex)
-        //        {
-        //            _logger.LogError(
-        //                ex,
-        //                "Membership operation failed for user: {User}", user);
-        //            throw;
-        //        }
-        //    }
-
-        //    _logger.LogInformation("Group membership processing completed.");
-        //}
+        
         public void GroupMembershipCommand(DL req)
         {
             using var scope = _logger.BeginScope(
@@ -135,33 +79,89 @@ namespace LombardAPI_NEW.Services
                         req.Event, req.Action);
                     throw;
                 }
-
-                string psCmd = template
-                    .Replace("{DLName}", req.DLName)
-                    .Replace("{User}", user);
-
-                _logger.LogDebug("Resolved PowerShell command: {PowerShellCommand}", psCmd);
-
-                try
+                if (req.Event == "Membership | OnPrem")
                 {
-                    _logger.LogInformation("Executing PowerShell command.");
-                    Powershell.RunPowerShell(psCmd);
-                    _logger.LogInformation("Membership operation succeeded for user: {User}", user);
+                    string psCmd = template
+                  .Replace("{DLName}", req.DLName)
+                  .Replace("{User}", user);
+                    _logger.LogInformation("Using on-premises membership command template.");
+
+                    _logger.LogDebug("Resolved PowerShell command: {PowerShellCommand}", psCmd);
+
+                    try
+                    {
+                        _logger.LogInformation("Executing PowerShell command.");
+                        Powershell.RunPowerShell(psCmd);
+                        _logger.LogInformation("Membership operation succeeded for user: {User}", user);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(
+                            ex,
+                            "Membership operation failed. User: {User}, DL: {DL}, Command: {Command}",
+                            user, req.DLName, psCmd);
+                        throw;
+                    }
                 }
-                catch (Exception ex)
+                else
                 {
-                    _logger.LogError(
-                        ex,
-                        "Membership operation failed. User: {User}, DL: {DL}, Command: {Command}",
-                        user, req.DLName, psCmd);
-                    throw;
-                }
+                    string groupCommand = "";
+                    if (req.Action == "Add")
+                    {
+                        groupCommand = _cmd.Membership.Cloud.Add
+     .Replace("{DLName}", req.DLName)
+     .Replace("{User}", req.EmpIds);
+                    }
+                    else
+                    {
+                        groupCommand = _cmd.Membership.Cloud.Remove
+                        .Replace("{DLName}", req.DLName)
+                        .Replace("{User}", req.EmpIds);
+                    }
+
+                    var groupResult = RunExchangeCloudCommand(groupCommand);
+                    if (!string.IsNullOrWhiteSpace(groupResult))
+                    {
+                        _logger.LogInformation("Group command executed successfully. Proceeding with membership command.");
+                    }
+                    else
+                    {
+                        _logger.LogError("Group command execution failed. Aborting membership command.");
+                        throw new Exception("Failed to execute group command. Cannot proceed with membership changes.");
+                    }
+                    _logger.LogInformation("Using cloud membership command template.");
+                }            
             }
-
             _logger.LogInformation("GroupMembershipCommand completed successfully.");
         }
+        public string RunExchangeCloudCommand(string command)
+        {
+            using var scope = _logger.BeginScope("ExchangeCloud | Command: {Cmd}", command);
 
+            try
+            {
+                string connectScript = _cmd.Membership.Cloud.ConnectScript;
 
+                if (string.IsNullOrWhiteSpace(connectScript))
+                    throw new Exception("CONFIG ERROR: Exchange connect script missing.");
+
+                _logger.LogInformation("STEP 1 → Connecting to Exchange Online");
+
+                var connectResult = Powershell.RunPowerShellCloudConnect(connectScript, command);
+
+                
+
+                return connectResult;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Exchange execution failed.");
+
+                throw new ServiceException(
+                    "Exchange Cloud execution failed. Possible causes: Certificate issue, App permission missing, or Exchange role not assigned.",
+                    ex);
+            }
+        }
         public void RightsManagementCommand(DL req)
         {
             using var scope = _logger.BeginScope(
@@ -194,19 +194,48 @@ namespace LombardAPI_NEW.Services
             _logger.LogInformation("Executing rights management command.");
             _logger.LogDebug("PowerShell Command: {Command}", psCmd);
 
-            try
+            if (req.Event == "Rights | OnPrem")
             {
-                Powershell.RunPowerShell(psCmd);
-                _logger.LogInformation("Rights management operation succeeded.");
+                try
+                {
+                    Powershell.RunPowerShell(psCmd);
+                    _logger.LogInformation("Rights management operation succeeded.");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Rights management operation failed.");
+                    throw;
+                }
             }
-            catch (Exception ex)
+            else
             {
-                _logger.LogError(ex, "Rights management operation failed.");
-                throw;
+                string groupCommand = "";
+                if (req.Action == "Add")
+                {
+                    groupCommand = _cmd.Rights.Cloud.Add
+                    .Replace("{DLName}", req.DLName)
+                    .Replace("{User}", req.Rights);
+                }
+                else
+                {
+                    groupCommand = _cmd.Rights.Cloud.Remove
+                    .Replace("{DLName}", req.DLName)
+                    .Replace("{User}", req.Rights);
+                }
+
+                var groupResult = RunExchangeCloudCommand(groupCommand);
+                if (!string.IsNullOrWhiteSpace(groupResult))
+                {
+                    _logger.LogInformation("Group command executed successfully. Proceeding with membership command.");
+                }
+                else
+                {
+                    _logger.LogError("Group command execution failed. Aborting membership command.");
+                    throw new Exception("Failed to execute group command. Cannot proceed with membership changes.");
+                }
+                _logger.LogInformation("Using cloud membership command template.");
             }
         }
-
-
         public void AccountUnlockCommand(DL req)
         {
             using var scope = _logger.BeginScope(
@@ -266,7 +295,6 @@ namespace LombardAPI_NEW.Services
 
             _logger.LogInformation("Account unlocked and verified successfully.");
         }
-
     }
 
 }

@@ -25,11 +25,20 @@ namespace LombardAPI_NEW.Services
             _logger = logger;
             _commonService = commonService;
         }
-
-
-
         public async Task<AccountUnlockResponseDTO> GetUserDetailsAsync(string employeeId)
         {
+            //var mock = new AccountUnlockResponseDTO
+            //{
+            //    EmployeeId = employeeId,
+            //    IsLocked = true,
+            //    AccountStatus = "Disabled",
+            //    AccountExpiry = "Never",
+            //    PasswordStatus = "Password Expired",
+            //    Info = "Debug endpoint response"
+            //};
+
+            //return mock;
+
             using var scope = _logger.BeginScope(
                 "AccountUnlock | EmployeeId: {EmployeeId}", employeeId);
 
@@ -47,6 +56,7 @@ namespace LombardAPI_NEW.Services
                 _logger.LogError(ex, "PowerShell execution failed.");
                 return null;
             }
+            _logger.LogDebug("PowerShell Command Output: " + output);
 
             _logger.LogDebug(
                 "PowerShell output length: {Length}, snippet: {Snippet}",
@@ -95,22 +105,96 @@ namespace LombardAPI_NEW.Services
             _logger.LogInformation(
                 "Account status resolved. SamAccountName: {Sam}, Locked: {Locked}",
                 samProp.GetString(), locked);
+            string sam = samProp.GetString() ?? string.Empty;
+
+            // ---------- Account Status ----------
+            string accountStatus = "Unknown";
+
+            if (user.TryGetProperty("UserAccountControl", out var uacProp))
+            {
+                int uac = 0;
+                int.TryParse(uacProp.ToString(), out uac);
+
+                accountStatus = uac switch
+                {
+                    512 => "Enabled",
+                    514 => "Disabled",
+                    _ => "Unknown"
+                };
+            }
+            else if (user.TryGetProperty("Enabled", out var enabledProp))
+            {
+                accountStatus = enabledProp.GetBoolean() ? "Enabled" : "Disabled";
+            }
+
+            // ---------- Info ----------
+            string info = user.TryGetProperty("Info", out var infoProp)
+                ? infoProp.ToString()
+                : "";
+            _logger.LogInformation($"{info}", info);
+            // ---------- Account Expiry ----------
+            string accountExpiry = "Never";
+
+            if (user.TryGetProperty("AccountExpires", out var expProp))
+            {
+                if (long.TryParse(expProp.ToString(), out var fileTime))
+                {
+                    var safeDate = SafeFromFileTime(fileTime);
+
+                    if (safeDate.HasValue)
+                        accountExpiry = safeDate.Value.ToString("dd MMM yyyy");
+                }
+            }
+
+            // ---------- Password Expiry ----------
+            string passwordStatus = "Unknown";
+
+            if (user.TryGetProperty("PasswordLastSet", out var pwdProp))
+            {
+                if (DateTime.TryParse(pwdProp.ToString(), out var lastSet))
+                {
+                    var expiry = lastSet.AddDays(60);
+
+                    passwordStatus = expiry < DateTime.UtcNow
+                        ? "Password Expired"
+                        : expiry.ToString("dd MMM yyyy");
+                }
+            }
+
+
 
             return new AccountUnlockResponseDTO
             {
-                EmployeeId = samProp.GetString() ?? string.Empty,
-                IsLocked = locked
+                EmployeeId = sam,
+                IsLocked = locked,
+                AccountStatus = accountStatus,
+                AccountExpiry = accountExpiry,
+                PasswordStatus = passwordStatus,
+                Info = info
             };
-        }
 
+        }
         private bool LooksLikeJson(string input)
         {
             var trimmed = input.TrimStart();
             return trimmed.StartsWith("{") || trimmed.StartsWith("[");
         }
+        private static DateTime? SafeFromFileTime(long fileTime)
+        {
+            // AD special values or invalid range
+            if (fileTime <= 0 || fileTime == long.MaxValue)
+                return null;
 
-
-        public async Task<string> SaveToDB(AccountUnlockRequestDTO dto)
+            try
+            {
+                return DateTime.FromFileTimeUtc(fileTime);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return null;
+            }
+        }
+        public async Task<bool> SaveToDB(AccountUnlockRequestDTO dto)
         {
             try
             {
@@ -121,51 +205,72 @@ namespace LombardAPI_NEW.Services
                     DLName = dto.DLName,
                     DLOWner = dto.DLOwner,
                     Action = "",
-                    EmpIds = "",
+                    EmpIds = dto.EmployeeId,
                     Rights = "",
-                    IsLocked = dto.Unlock,
+                    IsLocked = false,
                     CreatedTime = DateTime.UtcNow,
-                    ApprovalStatus = "Pending",
+                    ApprovalStatus = "Completed",
                     ApproverEmail = null
                 };
 
                 await _context.DLDetails.AddAsync(dl);
                 await _context.SaveChangesAsync();
 
-                return dl.ApprovalID;
+                return true;
             }
             catch (Exception ex)
             {
-                return "";
+                throw;
             }
         }
-
         public async Task<ApiResponse> UnlockAccountAsync(AccountUnlockRequestDTO request)
         {
-            // 2️⃣ Save audit
-            var approvalId = await SaveToDB(request);
-            if (string.IsNullOrEmpty(approvalId))
-                return ApiResponse.Fail("Failed to save approval request.");
+            string unlockCmd = _cmd.AccountUnlock.Unlock
+               .Replace("{EmpId}", request.EmployeeId);
 
-            // 3️⃣ Send mail
-            var link = $"{_commonService.GetEmailBaseUrl()}approval?id={approvalId}";
-            var mailSent = await _emailService.SendEmailAsync(
-                "",
-                "Unlock Lock Account Request",
-                BuildMailBody(link)
-            );
+            _logger.LogInformation("Executing account unlock command.");
+            _logger.LogDebug("PowerShell Unlock Command: {Command}", unlockCmd);
 
-            if (!mailSent)
-                return ApiResponse.Fail("Unlock done but mail failed.");
+            try
+            {
+                Powershell.RunPowerShell(unlockCmd);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Account unlock PowerShell command failed.");
+                return ApiResponse.Ok(new
+                {
+                    EmployeeId = request.EmployeeId,
+                    Status = "Account Unlocked Failed",
+                    ApprovalId = ""
+                });
+                throw;
+            }
+
+            try
+            {
+                var res = SaveToDB(request);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to save in DB");
+                return ApiResponse.Ok(new
+                {
+                    EmployeeId = request.EmployeeId,
+                    Status = "Account Unlocked Failed",
+                    ApprovalId = ""
+                });
+                throw;
+            }
+
 
             return ApiResponse.Ok(new
             {
                 EmployeeId = request.EmployeeId,
                 Status = "Account Unlocked",
-                ApprovalId = approvalId
+                ApprovalId = ""
             });
         }
-
         private string BuildMailBody(string link)
         {
             return $@"
@@ -209,7 +314,6 @@ namespace LombardAPI_NEW.Services
 
   </div>";
         }
-
         private bool TryParseUser(string json, out JsonElement element)
         {
             element = default;

@@ -121,8 +121,7 @@ namespace LombardAPI_NEW.Controllers
 
                 "partial" => new List<GALSearchResponseDTO>
         {
-            new GALSearchResponseDTO
-            {
+            new GALSearchResponseDTO{
                 FirstName = "Sneha",
                 LastName = "Patil",
                 Display = "Sneha Patil",
@@ -139,8 +138,7 @@ namespace LombardAPI_NEW.Controllers
         },
                 "page" => new List<GALSearchResponseDTO>
         {
-            new GALSearchResponseDTO
-            {
+            new GALSearchResponseDTO{
                 FirstName = "Sneha",
                 LastName = "Patil",
                 Display = "Sneha Patil",
@@ -154,7 +152,200 @@ namespace LombardAPI_NEW.Controllers
                 Company = "ICICI Lombard",
                 Country = "India"
             },
-              new GALSearchResponseDTO
+              new GALSearchResponseDTO {
+                FirstName = "Sneha",
+                LastName = "Patil",
+                Display = "Sneha Patil",
+                EmpNo = "EMP30987",
+                EmailAddress = "sneha.patil@company.com",
+                Mobile = null,
+                Department = "HR",
+                Designation = null,
+                Manager = "Vikas Singh",
+                Location = "Pune",
+                Company = "ICICI Lombard",
+                Country = "India"
+            },  new GALSearchResponseDTO {
+                FirstName = "Sneha",
+                LastName = "Patil",
+                Display = "Sneha Patil",
+                EmpNo = "EMP30987",
+                EmailAddress = "sneha.patil@company.com",
+                Mobile = null,
+                Department = "HR",
+                Designation = null,
+                Manager = "Vikas Singh",
+                Location = "Pune",
+                Company = "ICICI Lombard",
+                Country = "India"
+            },  new GALSearchResponseDTO{
+                FirstName = "Sneha",
+                LastName = "Patil",
+                Display = "Sneha Patil",
+                EmpNo = "EMP30987",
+                EmailAddress = "sneha.patil@company.com",
+                Mobile = null,
+                Department = "HR",
+                Designation = null,
+                Manager = "Vikas Singh",
+                Location = "Pune",
+                Company = "ICICI Lombard",
+                Country = "India"
+            },  new GALSearchResponseDTO {
+                FirstName = "Sneha",
+                LastName = "Patil",
+                Display = "Sneha Patil",
+                EmpNo = "EMP30987",
+                EmailAddress = "sneha.patil@company.com",
+                Mobile = null,
+                Department = "HR",
+                Designation = null,
+                Manager = "Vikas Singh",
+                Location = "Pune",
+                Company = "ICICI Lombard",
+                Country = "India"
+            },  new GALSearchResponseDTO{
+                FirstName = "Sneha",
+                LastName = "Patil",
+                Display = "Sneha Patil",
+                EmpNo = "EMP30987",
+                EmailAddress = "sneha.patil@company.com",
+                Mobile = null,
+                Department = "HR",
+                Designation = null,
+                Manager = "Vikas Singh",
+                Location = "Pune",
+                Company = "ICICI Lombard",
+                Country = "India"
+            },  
+                    new GALSearchResponseDTO{
+
+                FirstName = "Sneha",
+                LastName = "Patil",
+                Display = "Sneha Patil",
+                EmpNo = "EMP30987",
+                EmailAddress = "sneha.patil@company.com",
+                Mobile = null,
+                Department = "HR",
+                Designation = null,
+                Manager = "Vikas Singh",
+                Location = "Pune",
+                Company = "ICICI Lombard",
+                Country = "India"
+            },  
+                    new GALSearchResponseDTO{
+                FirstName = "Sneha",
+                LastName = "Patil",
+                Display = "Sneha Patil",
+                EmpNo = "EMP30987",
+                EmailAddress = "sneha.patil@company.com",
+                Mobile = null,
+                Department = "HR",
+                Designation = null,
+                Manager = "Vikas Singh",
+                Location = "Pune",
+                Company = "ICICI Lombard",
+                Country = "India"
+            }, 
+                    new GALSearchResponseDTO{
+                FirstName = "Sneha",
+                LastName = "Patil",
+                Display = "Sneha Patil",
+                EmpNo = "EMP30987",
+                EmailAddress = "sneha.patil@company.com",
+                Mobile = null,
+                Department = "HR",
+                Designation = null,
+                Manager = "Vikas Singh",
+                Location = "Pune",
+                Company = "ICICI Lombard",
+                Country = "India"
+            }, 
+                    new GALSearchResponseDTO{
+                FirstName = "Sneha",
+                LastName = "Patil",
+                Display = "Sneha Patil",
+                EmpNo = "EMP30987",
+                EmailAddress = "sneha.patil@company.com",
+                Mobile = null,
+                Department = "HR",
+                Designation = null,
+                Manager = "Vikas Singh",
+                Location = "Pune",
+                Company = "ICICI Lombard",
+                Country = "India"
+            },
+                    new GALSearchResponseDTO {
+                FirstName = "Sneha",
+                LastName = "Patil",
+                Display = "Sneha Patil",
+                EmpNo = "EMP30987",
+                EmailAddress = "sneha.patil@company.com",
+                Mobile = null,
+                Department = "HR",
+                Designation = null,
+                Manager = "Vikas Singh",
+                Location = "Pune",
+                Company = "ICICI Lombard",
+                Country = "India"
+            }, 
+                    new GALSearchResponseDTO {
+                FirstName = "Sneha",
+                LastName = "Patil",
+                Display = "Sneha Patil",
+                EmpNo = "EMP30987",
+                EmailAddress = "sneha.patil@company.com",
+                Mobile = null,
+                Department = "HR",
+                Designation = null,
+                Manager = "Vikas Singh",
+                Location = "Pune",
+                Company = "ICICI Lombard",
+                Country = "India"
+            },  
+                    new GALSearchResponseDTO{
+                FirstName = "Sneha",
+                LastName = "Patil",
+                Display = "Sneha Patil",
+                EmpNo = "EMP30987",
+                EmailAddress = "sneha.patil@company.com",
+                Mobile = null,
+                Department = "HR",
+                Designation = null,
+                Manager = "Vikas Singh",
+                Location = "Pune",
+                Company = "ICICI Lombard",
+                Country = "India"
+            },  
+                    new GALSearchResponseDTO{
+                FirstName = "Sneha",
+                LastName = "Patil",
+                Display = "Sneha Patil",
+                EmpNo = "EMP30987",
+                EmailAddress = "sneha.patil@company.com",
+                Mobile = null,
+                Department = "HR",
+                Designation = null,
+                Manager = "Vikas Singh",
+                Location = "Pune",
+                Company = "ICICI Lombard",
+                Country = "India"
+            },  
+                    new GALSearchResponseDTO {
+                FirstName = "Sneha",
+                LastName = "Patil",
+                Display = "Sneha Patil",
+                EmpNo = "EMP30987",
+                EmailAddress = "sneha.patil@company.com",
+                Mobile = null,
+                Department = "HR",
+                Designation = null,
+                Manager = "Vikas Singh",
+                Location = "Pune",
+                Company = "ICICI Lombard",
+                Country = "India"
+            },  
+                    new GALSearchResponseDTO
             {
                 FirstName = "Sneha",
                 LastName = "Patil",
@@ -168,203 +359,8 @@ namespace LombardAPI_NEW.Controllers
                 Location = "Pune",
                 Company = "ICICI Lombard",
                 Country = "India"
-            },  new GALSearchResponseDTO
-            {
-                FirstName = "Sneha",
-                LastName = "Patil",
-                Display = "Sneha Patil",
-                EmpNo = "EMP30987",
-                EmailAddress = "sneha.patil@company.com",
-                Mobile = null,
-                Department = "HR",
-                Designation = null,
-                Manager = "Vikas Singh",
-                Location = "Pune",
-                Company = "ICICI Lombard",
-                Country = "India"
-            },  new GALSearchResponseDTO
-            {
-                FirstName = "Sneha",
-                LastName = "Patil",
-                Display = "Sneha Patil",
-                EmpNo = "EMP30987",
-                EmailAddress = "sneha.patil@company.com",
-                Mobile = null,
-                Department = "HR",
-                Designation = null,
-                Manager = "Vikas Singh",
-                Location = "Pune",
-                Company = "ICICI Lombard",
-                Country = "India"
-            },  new GALSearchResponseDTO
-            {
-                FirstName = "Sneha",
-                LastName = "Patil",
-                Display = "Sneha Patil",
-                EmpNo = "EMP30987",
-                EmailAddress = "sneha.patil@company.com",
-                Mobile = null,
-                Department = "HR",
-                Designation = null,
-                Manager = "Vikas Singh",
-                Location = "Pune",
-                Company = "ICICI Lombard",
-                Country = "India"
-            },  new GALSearchResponseDTO
-            {
-                FirstName = "Sneha",
-                LastName = "Patil",
-                Display = "Sneha Patil",
-                EmpNo = "EMP30987",
-                EmailAddress = "sneha.patil@company.com",
-                Mobile = null,
-                Department = "HR",
-                Designation = null,
-                Manager = "Vikas Singh",
-                Location = "Pune",
-                Company = "ICICI Lombard",
-                Country = "India"
-            },  new GALSearchResponseDTO
-            {
-                FirstName = "Sneha",
-                LastName = "Patil",
-                Display = "Sneha Patil",
-                EmpNo = "EMP30987",
-                EmailAddress = "sneha.patil@company.com",
-                Mobile = null,
-                Department = "HR",
-                Designation = null,
-                Manager = "Vikas Singh",
-                Location = "Pune",
-                Company = "ICICI Lombard",
-                Country = "India"
-            },  new GALSearchResponseDTO
-            {
-                FirstName = "Sneha",
-                LastName = "Patil",
-                Display = "Sneha Patil",
-                EmpNo = "EMP30987",
-                EmailAddress = "sneha.patil@company.com",
-                Mobile = null,
-                Department = "HR",
-                Designation = null,
-                Manager = "Vikas Singh",
-                Location = "Pune",
-                Company = "ICICI Lombard",
-                Country = "India"
-            },  new GALSearchResponseDTO
-            {
-                FirstName = "Sneha",
-                LastName = "Patil",
-                Display = "Sneha Patil",
-                EmpNo = "EMP30987",
-                EmailAddress = "sneha.patil@company.com",
-                Mobile = null,
-                Department = "HR",
-                Designation = null,
-                Manager = "Vikas Singh",
-                Location = "Pune",
-                Company = "ICICI Lombard",
-                Country = "India"
-            },  new GALSearchResponseDTO
-            {
-                FirstName = "Sneha",
-                LastName = "Patil",
-                Display = "Sneha Patil",
-                EmpNo = "EMP30987",
-                EmailAddress = "sneha.patil@company.com",
-                Mobile = null,
-                Department = "HR",
-                Designation = null,
-                Manager = "Vikas Singh",
-                Location = "Pune",
-                Company = "ICICI Lombard",
-                Country = "India"
-            },  new GALSearchResponseDTO
-            {
-                FirstName = "Sneha",
-                LastName = "Patil",
-                Display = "Sneha Patil",
-                EmpNo = "EMP30987",
-                EmailAddress = "sneha.patil@company.com",
-                Mobile = null,
-                Department = "HR",
-                Designation = null,
-                Manager = "Vikas Singh",
-                Location = "Pune",
-                Company = "ICICI Lombard",
-                Country = "India"
-            },  new GALSearchResponseDTO
-            {
-                FirstName = "Sneha",
-                LastName = "Patil",
-                Display = "Sneha Patil",
-                EmpNo = "EMP30987",
-                EmailAddress = "sneha.patil@company.com",
-                Mobile = null,
-                Department = "HR",
-                Designation = null,
-                Manager = "Vikas Singh",
-                Location = "Pune",
-                Company = "ICICI Lombard",
-                Country = "India"
-            },  new GALSearchResponseDTO
-            {
-                FirstName = "Sneha",
-                LastName = "Patil",
-                Display = "Sneha Patil",
-                EmpNo = "EMP30987",
-                EmailAddress = "sneha.patil@company.com",
-                Mobile = null,
-                Department = "HR",
-                Designation = null,
-                Manager = "Vikas Singh",
-                Location = "Pune",
-                Company = "ICICI Lombard",
-                Country = "India"
-            },  new GALSearchResponseDTO
-            {
-                FirstName = "Sneha",
-                LastName = "Patil",
-                Display = "Sneha Patil",
-                EmpNo = "EMP30987",
-                EmailAddress = "sneha.patil@company.com",
-                Mobile = null,
-                Department = "HR",
-                Designation = null,
-                Manager = "Vikas Singh",
-                Location = "Pune",
-                Company = "ICICI Lombard",
-                Country = "India"
-            },  new GALSearchResponseDTO
-            {
-                FirstName = "Sneha",
-                LastName = "Patil",
-                Display = "Sneha Patil",
-                EmpNo = "EMP30987",
-                EmailAddress = "sneha.patil@company.com",
-                Mobile = null,
-                Department = "HR",
-                Designation = null,
-                Manager = "Vikas Singh",
-                Location = "Pune",
-                Company = "ICICI Lombard",
-                Country = "India"
-            },  new GALSearchResponseDTO
-            {
-                FirstName = "Sneha",
-                LastName = "Patil",
-                Display = "Sneha Patil",
-                EmpNo = "EMP30987",
-                EmailAddress = "sneha.patil@company.com",
-                Mobile = null,
-                Department = "HR",
-                Designation = null,
-                Manager = "Vikas Singh",
-                Location = "Pune",
-                Company = "ICICI Lombard",
-                Country = "India"
-            },  new GALSearchResponseDTO
+            },  
+                    new GALSearchResponseDTO
             {
                 FirstName = "Sneha",
                 LastName = "Patil",

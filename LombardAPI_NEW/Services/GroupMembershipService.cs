@@ -30,8 +30,128 @@ namespace LombardAPI_NEW.Services
             _logger = logger;
             _cmd = options.Value;
             _commonService = commonService;
-
         }
+
+        public string RunExchangeCloudCommand(string command)
+        {
+            using var scope = _logger.BeginScope("ExchangeCloud | Command: {Cmd}", command);
+
+            try
+            {
+                string connectScript = _cmd.Membership.Cloud.ConnectScript;
+
+                if (string.IsNullOrWhiteSpace(connectScript))
+                    throw new Exception("CONFIG ERROR: Exchange connect script missing.");
+
+                _logger.LogInformation("STEP 1 → Connecting to Exchange Online");
+
+                var connectResult = Powershell.RunPowerShellCloudConnect(connectScript,command);
+
+                //if (string.IsNullOrWhiteSpace(connectResult))
+                //    _logger.LogWarning("Exchange connect returned empty output (normal behavior).");
+
+                //_logger.LogInformation("STEP 2 → Running Exchange command");
+
+                //var result = Powershell.RunPowerShell(command);
+
+                //if (string.IsNullOrWhiteSpace(result))
+                //    throw new Exception("Exchange command returned empty result. Possible reasons: DL not found or permission missing.");
+
+                //_logger.LogInformation("STEP 3 → Exchange command executed successfully");
+
+                return connectResult;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Exchange execution failed.");
+
+                throw new ServiceException(
+                    "Exchange Cloud execution failed. Possible causes: Certificate issue, App permission missing, or Exchange role not assigned.",
+                    ex);
+            }
+        }
+
+        public Task<AddOrRemoveDLMembershipDTO> GetByDLNameCloudAsync(string dlName)
+        {
+            using var scope = _logger.BeginScope("Cloud DL Lookup | {DL}", dlName);
+
+            try
+            {
+                if (string.IsNullOrWhiteSpace(dlName))
+                    throw new ServiceException("DL name cannot be empty.");
+
+                _logger.LogInformation("STEP 1 → Preparing PowerShell command");
+
+                string command = _cmd.Membership.Cloud.GetDLWithOwner
+                    .Replace("{dlName}", dlName);
+
+                _logger.LogDebug("Exchange Command: {Command}", command);
+
+                _logger.LogInformation("STEP 2 → Executing Exchange lookup");
+
+                var result = RunExchangeCloudCommand(command);
+
+                _logger.LogInformation("STEP 3 → Parsing Exchange result" + result.ToString());
+
+                var json = JsonSerializer.Deserialize<JsonElement>(result);
+                _logger.LogInformation("STEP 4 → Parsing result as json" + json.ToString());
+                string ownerName = json.GetProperty("OwnerName").ValueKind switch
+                {
+                    JsonValueKind.Array => string.Join(", ",
+                        json.GetProperty("OwnerName").EnumerateArray().Select(x => x.GetString())),
+                    _ => json.GetProperty("OwnerName").GetString()
+                };
+                _logger.LogInformation("OWner" + ownerName.ToString());
+                string ownerEmail = json.GetProperty("OwnerEmail").ValueKind switch
+                {
+                    JsonValueKind.Array => string.Join(", ",
+                        json.GetProperty("OwnerEmail").EnumerateArray().Select(x => x.GetString())),
+                    _ => json.GetProperty("OwnerEmail").GetString()
+                };
+                _logger.LogInformation("DL Owner resolved: {Owner}", ownerName);
+
+                return Task.FromResult(new AddOrRemoveDLMembershipDTO
+                {
+                    DLName = dlName,
+                    DLOwner = $"{ownerName} ({ownerEmail})"
+                });
+            }
+            catch (ServiceException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Cloud DL lookup failed");
+
+                throw new ServiceException(
+                    "Unable to fetch DL details from Exchange Cloud.",
+                    ex);
+            }
+        }
+        public string ExchangeHealthCheck()
+        {
+            try
+            {
+                _logger.LogInformation("Running Exchange Cloud health check");
+
+                string testCommand = "Get-OrganizationConfig | Select Name | ConvertTo-Json";
+
+                var result = RunExchangeCloudCommand(testCommand);
+
+                if (string.IsNullOrWhiteSpace(result))
+                    throw new Exception("Exchange returned empty organization config");
+
+                return "SUCCESS: Exchange Cloud connection working.";
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Exchange health check failed");
+
+                return $"FAILED: {ex.Message}";
+            }
+        }
+
 
         private string SafeSnippet(string input, int length = 200)
         {
@@ -173,156 +293,156 @@ namespace LombardAPI_NEW.Services
             }
         }
 
-        public async Task<AddOrRemoveDLMembershipDTO> GetByDLNameCloudAsync(string dlName)
-        {
-            using var scope = _logger.BeginScope("GetByDLNameCloudAsync | DLName: {DLName}", dlName);
+        //public async Task<AddOrRemoveDLMembershipDTO> GetByDLNameCloudAsync(string dlName)
+        //{
+        //    using var scope = _logger.BeginScope("GetByDLNameCloudAsync | DLName: {DLName}", dlName);
 
-            try
-            {
-                _logger.LogInformation("Method started.");
+        //    try
+        //    {
+        //        _logger.LogInformation("Method started.");
 
-                if (string.IsNullOrWhiteSpace(dlName))
-                {
-                    _logger.LogWarning("DL name is null or empty.");
-                    throw new ArgumentException("DL name cannot be null or empty");
-                }
+        //        if (string.IsNullOrWhiteSpace(dlName))
+        //        {
+        //            _logger.LogWarning("DL name is null or empty.");
+        //            throw new ArgumentException("DL name cannot be null or empty");
+        //        }
 
-                // 🔹 DEBUG MODE — return fake data, skip PowerShell
-                if ("1y" == "y")
-                {
-                    _logger.LogWarning("DEBUG MODE enabled. Returning mocked DL owner.");
-                    return new AddOrRemoveDLMembershipDTO
-                    {
-                        DLName = dlName,
-                        DLOwner = "Debug Owner (ILOM00000)"
-                    };
-                }
+        //        // 🔹 DEBUG MODE — return fake data, skip PowerShell
+        //        if ("1y" == "y")
+        //        {
+        //            _logger.LogWarning("DEBUG MODE enabled. Returning mocked DL owner.");
+        //            return new AddOrRemoveDLMembershipDTO
+        //            {
+        //                DLName = dlName,
+        //                DLOwner = "Debug Owner (ILOM00000)"
+        //            };
+        //        }
 
-                /* ===============================
-                   STEP 1: GET AD GROUP
-                ================================*/
+        //        /* ===============================
+        //           STEP 1: GET AD GROUP
+        //        ================================*/
 
-                _logger.LogInformation("Executing Get-ADGroup command.");
+        //        _logger.LogInformation("Executing Get-ADGroup command.");
 
-                string groupCommand = _cmd.Membership.Cloud.Get.Replace("{dlName}", dlName);
-                //string groupCommand =
-                //    $"Get-ADGroup -Identity \"{dlName}\" -Properties ManagedBy | ConvertTo-Json -Depth 5";
+        //        string groupCommand = _cmd.Membership.Cloud.Get.Replace("{dlName}", dlName);
+        //        //string groupCommand =
+        //        //    $"Get-ADGroup -Identity \"{dlName}\" -Properties ManagedBy | ConvertTo-Json -Depth 5";
 
-                _logger.LogDebug("Group PS Command: {Command}", groupCommand);
+        //        _logger.LogDebug("Group PS Command: {Command}", groupCommand);
 
-                var groupResult = Powershell.RunPowerShell(groupCommand);
+        //        var groupResult = Powershell.RunPowerShell(groupCommand);
 
-                _logger.LogDebug(
-                    "Group PS Result Length: {Length}, Snippet: {Snippet}",
-                    groupResult?.Length ?? 0,
-                    SafeSnippet(groupResult)
-                );
+        //        _logger.LogDebug(
+        //            "Group PS Result Length: {Length}, Snippet: {Snippet}",
+        //            groupResult?.Length ?? 0,
+        //            SafeSnippet(groupResult)
+        //        );
 
-                if (string.IsNullOrEmpty(groupResult))
-                {
-                    _logger.LogError("Empty response from Get-ADGroup. Possible AD access or DL not found.");
-                    throw new Exception("Group not found");
-                }
+        //        if (string.IsNullOrEmpty(groupResult))
+        //        {
+        //            _logger.LogError("Empty response from Get-ADGroup. Possible AD access or DL not found.");
+        //            throw new Exception("Group not found");
+        //        }
 
-                JsonElement groupJson;
-                try
-                {
-                    groupJson = JsonSerializer.Deserialize<JsonElement>(groupResult);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to deserialize Get-ADGroup JSON.");
-                    throw;
-                }
+        //        JsonElement groupJson;
+        //        try
+        //        {
+        //            groupJson = JsonSerializer.Deserialize<JsonElement>(groupResult);
+        //        }
+        //        catch (Exception ex)
+        //        {
+        //            _logger.LogError(ex, "Failed to deserialize Get-ADGroup JSON.");
+        //            throw;
+        //        }
 
-                if (!groupJson.TryGetProperty("ManagedBy", out var managedByProp))
-                {
-                    _logger.LogWarning("ManagedBy property missing in AD group response.");
-                    return new AddOrRemoveDLMembershipDTO
-                    {
-                        DLName = dlName,
-                        DLOwner = "No Owner Assigned"
-                    };
-                }
+        //        if (!groupJson.TryGetProperty("ManagedBy", out var managedByProp))
+        //        {
+        //            _logger.LogWarning("ManagedBy property missing in AD group response.");
+        //            return new AddOrRemoveDLMembershipDTO
+        //            {
+        //                DLName = dlName,
+        //                DLOwner = "No Owner Assigned"
+        //            };
+        //        }
 
-                string managedByDn = managedByProp.GetString();
+        //        string managedByDn = managedByProp.GetString();
 
-                _logger.LogInformation("ManagedBy DN resolved: {ManagedByDn}", managedByDn);
+        //        _logger.LogInformation("ManagedBy DN resolved: {ManagedByDn}", managedByDn);
 
-                if (string.IsNullOrEmpty(managedByDn))
-                {
-                    _logger.LogInformation("ManagedBy DN is empty. DL has no owner.");
-                    return new AddOrRemoveDLMembershipDTO
-                    {
-                        DLName = dlName,
-                        DLOwner = "No Owner Assigned"
-                    };
-                }
+        //        if (string.IsNullOrEmpty(managedByDn))
+        //        {
+        //            _logger.LogInformation("ManagedBy DN is empty. DL has no owner.");
+        //            return new AddOrRemoveDLMembershipDTO
+        //            {
+        //                DLName = dlName,
+        //                DLOwner = "No Owner Assigned"
+        //            };
+        //        }
 
-                /* ===============================
-                   STEP 2: GET OWNER DETAILS
-                ================================*/
+        //        /* ===============================
+        //           STEP 2: GET OWNER DETAILS
+        //        ================================*/
 
-                _logger.LogInformation("Executing Get-ADUser command.");
+        //        _logger.LogInformation("Executing Get-ADUser command.");
 
-                string ownerCommand = _cmd.Membership.Cloud.ManagedBy.Replace("{managedByDn}", managedByDn);
-                //string ownerCommand =
-                //    $"Get-ADUser -Identity \"{managedByDn}\" -Properties DisplayName,SamAccountName | " +
-                //    "Select-Object DisplayName,SamAccountName | ConvertTo-Json";
+        //        string ownerCommand = _cmd.Membership.Cloud.ManagedBy.Replace("{managedByDn}", managedByDn);
+        //        //string ownerCommand =
+        //        //    $"Get-ADUser -Identity \"{managedByDn}\" -Properties DisplayName,SamAccountName | " +
+        //        //    "Select-Object DisplayName,SamAccountName | ConvertTo-Json";
 
-                _logger.LogDebug("Owner PS Command: {Command}", ownerCommand);
+        //        _logger.LogDebug("Owner PS Command: {Command}", ownerCommand);
 
-                var ownerResult = Powershell.RunPowerShell(ownerCommand);
+        //        var ownerResult = Powershell.RunPowerShell(ownerCommand);
 
-                _logger.LogDebug(
-                    "Owner PS Result Length: {Length}, Snippet: {Snippet}",
-                    ownerResult?.Length ?? 0,
-                    SafeSnippet(ownerResult)
-                );
+        //        _logger.LogDebug(
+        //            "Owner PS Result Length: {Length}, Snippet: {Snippet}",
+        //            ownerResult?.Length ?? 0,
+        //            SafeSnippet(ownerResult)
+        //        );
 
-                if (string.IsNullOrEmpty(ownerResult))
-                {
-                    _logger.LogError("Empty response from Get-ADUser. Owner DN may be invalid.");
-                    throw new Exception("Owner details not found");
-                }
+        //        if (string.IsNullOrEmpty(ownerResult))
+        //        {
+        //            _logger.LogError("Empty response from Get-ADUser. Owner DN may be invalid.");
+        //            throw new Exception("Owner details not found");
+        //        }
 
-                JsonElement ownerJson;
-                try
-                {
-                    ownerJson = JsonSerializer.Deserialize<JsonElement>(ownerResult);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to deserialize Get-ADUser JSON.");
-                    throw;
-                }
+        //        JsonElement ownerJson;
+        //        try
+        //        {
+        //            ownerJson = JsonSerializer.Deserialize<JsonElement>(ownerResult);
+        //        }
+        //        catch (Exception ex)
+        //        {
+        //            _logger.LogError(ex, "Failed to deserialize Get-ADUser JSON.");
+        //            throw;
+        //        }
 
-                string displayName = ownerJson.GetProperty("DisplayName").GetString();
-                string samAccountName = ownerJson.GetProperty("SamAccountName").GetString();
+        //        string displayName = ownerJson.GetProperty("DisplayName").GetString();
+        //        string samAccountName = ownerJson.GetProperty("SamAccountName").GetString();
 
-                _logger.LogInformation(
-                    "DL owner fetched successfully. DisplayName: {DisplayName}, SamAccountName: {Sam}",
-                    displayName,
-                    samAccountName
-                );
+        //        _logger.LogInformation(
+        //            "DL owner fetched successfully. DisplayName: {DisplayName}, SamAccountName: {Sam}",
+        //            displayName,
+        //            samAccountName
+        //        );
 
-                return new AddOrRemoveDLMembershipDTO
-                {
-                    DLName = dlName,
-                    DLOwner = $"{displayName} ({samAccountName})"
-                };
-            }
-            catch (ServiceException)
-            {
-                _logger.LogWarning("ServiceException occurred. Rethrowing.");
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Unhandled exception in GetByDLNameCloudAsync.");
-                throw new ServiceException("Unable to fetch DL details.", ex);
-            }
-        }
+        //        return new AddOrRemoveDLMembershipDTO
+        //        {
+        //            DLName = dlName,
+        //            DLOwner = $"{displayName} ({samAccountName})"
+        //        };
+        //    }
+        //    catch (ServiceException)
+        //    {
+        //        _logger.LogWarning("ServiceException occurred. Rethrowing.");
+        //        throw;
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        _logger.LogError(ex, "Unhandled exception in GetByDLNameCloudAsync.");
+        //        throw new ServiceException("Unable to fetch DL details.", ex);
+        //    }
+        //}
 
 
         public async Task<string> TestDBConnectionAsync()
@@ -388,8 +508,6 @@ namespace LombardAPI_NEW.Services
                 return $"FAILED ❌ | {ex.GetType().Name} | {ex.Message}";
             }
         }
-
-
 
         public async Task<bool> AddOrRemoveDLMembershipAsync(AddOrRemoveDLMembershipDTO dto)
         {
