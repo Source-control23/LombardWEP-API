@@ -7,6 +7,7 @@
         public string? Action { get; set; }
         public string? EmpIds { get; set; }
         public string? Source { get; set; }
-
+        public string? SendMailAccess { get; set; }
+        public string? GroupOwnershipChange { get; set; }
     }
 }

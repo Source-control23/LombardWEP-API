@@ -101,7 +101,7 @@ namespace LombardAPI_NEW.Services
                     _powershellcommand.GroupMembershipCommand(req);
                     _logger.LogInformation("GroupMembershipCommand executed successfully.");
                 }
-                else if (req.Event == "Rights | Onprem" || req.Event == "Rights | Cloud")
+                else if (req.Event == "Rights | OnPrem" || req.Event == "Rights | Cloud")
                 {
                     _logger.LogInformation("Executing RightsManagementCommand.");
                     _powershellcommand.RightsManagementCommand(req);

@@ -4,14 +4,14 @@ using LombardAPI_NEW.Models.DTOs;
 using LombardAPI_NEW.Shared;
 using Microsoft.Extensions.Options;
 using System.Text.Json;
-using System.Xml.Linq;
 
 namespace LombardAPI_NEW.Services
 {
-  public class PowershellCommandService
+    public class PowershellCommandService
     {
         private readonly PowerShellCommandSettings _cmd;
         private readonly ILogger<PowershellCommandService> _logger;
+
         public PowershellCommandService(
             IOptions<PowerShellCommandSettings> options,
             ILogger<PowershellCommandService> logger)
@@ -19,7 +19,10 @@ namespace LombardAPI_NEW.Services
             _cmd = options.Value;
             _logger = logger;
         }
-        
+
+        // ─────────────────────────────────────────────────────────────────────────
+        // GROUP MEMBERSHIP
+        // ─────────────────────────────────────────────────────────────────────────
         public void GroupMembershipCommand(DL req)
         {
             using var scope = _logger.BeginScope(
@@ -29,245 +32,275 @@ namespace LombardAPI_NEW.Services
             _logger.LogInformation("GroupMembershipCommand started.");
 
             if (string.IsNullOrWhiteSpace(req.DLName) || string.IsNullOrWhiteSpace(req.EmpIds))
-            {
-                _logger.LogError(
-                    "Validation failed. DLName or EmpIds is missing. DLName: {DLName}, EmpIds: {EmpIds}",
-                    req.DLName, req.EmpIds);
-
-                throw new ArgumentException("DLName and EmpIds are required.");
-            }
+                throw new ServiceException("DLName and EmpIds are required.");
 
             var users = req.EmpIds
                 .Split(',', StringSplitOptions.RemoveEmptyEntries)
                 .Select(u => u.Trim())
                 .ToArray();
 
-            _logger.LogInformation(
-                "Parsed users successfully. Total users to process: {UserCount}",
-                users.Length);
+            _logger.LogInformation("Parsed users successfully. Total users to process: {UserCount}", users.Length);
 
             for (int i = 0; i < users.Length; i++)
             {
                 var user = users[i];
+                _logger.LogInformation("Processing user {CurrentIndex}/{TotalUsers}. User: {User}", i + 1, users.Length, user);
 
-                _logger.LogInformation(
-                    "Processing user {CurrentIndex}/{TotalUsers}. User: {User}",
-                    i + 1, users.Length, user);
-
-                string template;
-                try
-                {
-                    template = req.Event switch
-                    {
-                        "Membership | OnPrem" => req.Action == "Add"
-                            ? _cmd.Membership.OnPrem.Add
-                            : _cmd.Membership.OnPrem.Remove,
-
-                        "Membership | Cloud" => req.Action == "Add"
-                            ? _cmd.Membership.Cloud.Add
-                            : _cmd.Membership.Cloud.Remove,
-
-                        _ => throw new InvalidOperationException(
-                            $"Invalid Membership Event: {req.Event}")
-                    };
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(
-                        ex,
-                        "Failed to resolve PowerShell template. Event: {Event}, Action: {Action}",
-                        req.Event, req.Action);
-                    throw;
-                }
-                if (req.Event == "Membership | OnPrem")
-                {
-                    string psCmd = template
-                  .Replace("{DLName}", req.DLName)
-                  .Replace("{User}", user);
-                    _logger.LogInformation("Using on-premises membership command template.");
-
-                    _logger.LogDebug("Resolved PowerShell command: {PowerShellCommand}", psCmd);
-
-                    try
-                    {
-                        _logger.LogInformation("Executing PowerShell command.");
-                        Powershell.RunPowerShell(psCmd);
-                        _logger.LogInformation("Membership operation succeeded for user: {User}", user);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(
-                            ex,
-                            "Membership operation failed. User: {User}, DL: {DL}, Command: {Command}",
-                            user, req.DLName, psCmd);
-                        throw;
-                    }
-                }
-                else
-                {
-                    string groupCommand = "";
-                    if (req.Action == "Add")
-                    {
-                        groupCommand = _cmd.Membership.Cloud.Add
-     .Replace("{DLName}", req.DLName)
-     .Replace("{User}", req.EmpIds);
-                    }
-                    else
-                    {
-                        groupCommand = _cmd.Membership.Cloud.Remove
-                        .Replace("{DLName}", req.DLName)
-                        .Replace("{User}", req.EmpIds);
-                    }
-
-                    var groupResult = RunExchangeCloudCommand(groupCommand);
-                    if (!string.IsNullOrWhiteSpace(groupResult))
-                    {
-                        _logger.LogInformation("Group command executed successfully. Proceeding with membership command.");
-                    }
-                    else
-                    {
-                        _logger.LogError("Group command execution failed. Aborting membership command.");
-                        throw new Exception("Failed to execute group command. Cannot proceed with membership changes.");
-                    }
-                    _logger.LogInformation("Using cloud membership command template.");
-                }            
+                ProcessSingleMembershipUser(req, user);
             }
+
             _logger.LogInformation("GroupMembershipCommand completed successfully.");
         }
-        public string RunExchangeCloudCommand(string command)
+
+        private void ProcessSingleMembershipUser(DL req, string user)
         {
-            using var scope = _logger.BeginScope("ExchangeCloud | Command: {Cmd}", command);
+            switch (req.Event)
+            {
+                case "Membership | OnPrem":
+                    ExecuteOnPremMembership(req, user);
+                    break;
+
+                case "Membership | Cloud":
+                    ExecuteCloudMembership(req, user);
+                    break;
+
+                default:
+                    _logger.LogError("Unsupported membership event type: {Event}", req.Event);
+                    throw new ServiceException($"Unsupported membership event: '{req.Event}'. Expected 'Membership | OnPrem' or 'Membership | Cloud'.");
+            }
+        }
+
+        private void ExecuteOnPremMembership(DL req, string user)
+        {
+            string template = req.Action == "Add"
+                ? _cmd.Membership.OnPrem.Add
+                : _cmd.Membership.OnPrem.Remove;
+
+            string psCmd = template
+                .Replace("{DLName}", req.DLName)
+                .Replace("{User}", user);
+
+            _logger.LogInformation("Using on-premises membership command template. Action: {Action}, User: {User}", req.Action, user);
 
             try
             {
-                string connectScript = _cmd.Membership.Cloud.ConnectScript;
-
-                if (string.IsNullOrWhiteSpace(connectScript))
-                    throw new Exception("CONFIG ERROR: Exchange connect script missing.");
-
-                _logger.LogInformation("STEP 1 → Connecting to Exchange Online");
-
-                var connectResult = Powershell.RunPowerShellCloudConnect(connectScript, command);
-
-                
-
-                return connectResult;
+                Powershell.RunPowerShell(psCmd);
+                _logger.LogInformation("On-prem membership operation succeeded. Action: {Action}, User: {User}, DL: {DL}", req.Action, user, req.DLName);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Exchange execution failed.");
+                string message = ex.Message ?? "";
 
-                throw new ServiceException(
-                    "Exchange Cloud execution failed. Possible causes: Certificate issue, App permission missing, or Exchange role not assigned.",
-                    ex);
+                if (IsAlreadyMemberError(message))
+                {
+                    _logger.LogWarning("User {User} is already a member of {DL}. Treating as success.", user, req.DLName);
+                    return; // idempotent — not a failure
+                }
+
+                if (IsNotMemberError(message))
+                {
+                    _logger.LogWarning("User {User} is not a member of {DL}. Cannot remove.", user, req.DLName);
+                    throw new ServiceException($"User '{user}' is not a member of '{req.DLName}'. Remove operation skipped.", ex);
+                }
+
+                if (IsUserNotFoundError(message))
+                {
+                    _logger.LogError("User {User} not found in Active Directory.", user);
+                    throw new ServiceException($"User '{user}' was not found in Active Directory.", ex);
+                }
+
+                _logger.LogError(ex, "On-prem membership operation failed. Action: {Action}, User: {User}, DL: {DL}", req.Action, user, req.DLName);
+                throw new ServiceException($"Failed to {req.Action.ToLower()} user '{user}' in DL '{req.DLName}'. Details: {ex.Message}", ex);
             }
         }
+
+        private void ExecuteCloudMembership(DL req, string user)
+        {
+            string template = req.Action == "Add"
+                ? _cmd.Membership.Cloud.Add
+                : _cmd.Membership.Cloud.Remove;
+
+            string psCmd = template
+                .Replace("{DLName}", req.DLName)
+                .Replace("{User}", user);
+
+            _logger.LogInformation("Using cloud membership command template. Action: {Action}, User: {User}", req.Action, user);
+
+            try
+            {
+                // ✅ FIX: Add/Remove-DistributionGroupMember returns NO output on success.
+                //         A thrown exception means failure — NOT an empty return value.
+                RunExchangeCloudCommand(psCmd);
+                _logger.LogInformation("Cloud membership operation succeeded. Action: {Action}, User: {User}, DL: {DL}", req.Action, user, req.DLName);
+            }
+            catch (ServiceException ex)
+            {
+                string message = ex.InnerException?.Message ?? ex.Message;
+
+                if (IsAlreadyMemberError(message))
+                {
+                    _logger.LogWarning("User {User} is already a member of {DL} (cloud). Treating as success.", user, req.DLName);
+                    return; // idempotent — not a failure
+                }
+
+                if (IsNotMemberError(message))
+                {
+                    _logger.LogWarning("User {User} is not a member of {DL} (cloud). Cannot remove.", user, req.DLName);
+                    throw new ServiceException($"User '{user}' is not a member of '{req.DLName}'. Remove operation skipped.", ex);
+                }
+
+                if (IsUserNotFoundError(message))
+                {
+                    _logger.LogError("User {User} not found in Exchange Online.", user);
+                    throw new ServiceException($"User '{user}' was not found in Exchange Online.", ex);
+                }
+
+                _logger.LogError(ex, "Cloud membership operation failed. Action: {Action}, User: {User}, DL: {DL}", req.Action, user, req.DLName);
+                throw new ServiceException($"Failed to {req.Action.ToLower()} user '{user}' in DL '{req.DLName}' (cloud). Details: {message}", ex);
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────────
+        // RIGHTS MANAGEMENT
+        // ─────────────────────────────────────────────────────────────────────────
         public void RightsManagementCommand(DL req)
         {
             using var scope = _logger.BeginScope(
                 "RightsManagement | DL: {DL}, Event: {Event}, Action: {Action}",
                 req.DLName, req.Event, req.Action);
 
+            _logger.LogInformation("RightsManagementCommand started.");
+
             if (string.IsNullOrWhiteSpace(req.DLName) || string.IsNullOrWhiteSpace(req.Rights))
+                throw new ServiceException("DLName and Rights are required.");
+
+            switch (req.Event)
             {
-                _logger.LogError("DLName or Rights missing.");
-                throw new ArgumentException("DLName and Rights are required.");
+                case "Rights | OnPrem":
+                    ExecuteOnPremRights(req);
+                    break;
+
+                case "Rights | Cloud":
+                    ExecuteCloudRights(req);
+                    break;
+
+                default:
+                    _logger.LogError("Unsupported rights event type: {Event}", req.Event);
+                    throw new ServiceException($"Unsupported rights event: '{req.Event}'. Expected 'Rights | OnPrem' or 'Rights | Cloud'.");
             }
 
-            string template = req.Event switch
-            {
-                "Rights | OnPrem" => req.Action == "Add"
-                    ? _cmd.Rights.OnPrem.Add
-                    : _cmd.Rights.OnPrem.Remove,
+            _logger.LogInformation("RightsManagementCommand completed successfully.");
+        }
 
-                "Rights | Cloud" => req.Action == "Add"
-                    ? _cmd.Rights.Cloud.Add
-                    : _cmd.Rights.Cloud.Remove,
+        private void ExecuteOnPremRights(DL req)
+        {
+            _logger.LogInformation("---- START ExecuteOnPremRights ----");
 
-                _ => throw new InvalidOperationException("Invalid Rights Event")
-            };
+            _logger.LogInformation("Incoming Request -> DLName: {DLName}, Rights: {Rights}, Action: {Action}",
+                req.DLName, req.Rights, req.Action);
+
+            string template = req.Action == "Add"
+                ? _cmd.Rights.OnPrem.Add
+                : _cmd.Rights.OnPrem.Remove;
+
+            _logger.LogInformation("Template fetched from config: {Template}", template);
 
             string psCmd = template
                 .Replace("{DLName}", req.DLName)
                 .Replace("{Rights}", req.Rights);
 
-            _logger.LogInformation("Executing rights management command.");
-            _logger.LogDebug("PowerShell Command: {Command}", psCmd);
+            _logger.LogInformation("Final PowerShell Command: {Command}", psCmd);
 
-            if (req.Event == "Rights | OnPrem")
+            try
             {
-                try
-                {
-                    Powershell.RunPowerShell(psCmd);
-                    _logger.LogInformation("Rights management operation succeeded.");
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Rights management operation failed.");
-                    throw;
-                }
+                var startTime = DateTime.UtcNow;
+
+                _logger.LogInformation("Executing PowerShell command...");
+
+                Powershell.RunPowerShell(psCmd);
+
+                var endTime = DateTime.UtcNow;
+
+                _logger.LogInformation("Execution completed successfully in {Duration} ms",
+                    (endTime - startTime).TotalMilliseconds);
+
+                _logger.LogInformation("---- END ExecuteOnPremRights SUCCESS ----");
             }
-            else
+            catch (Exception ex)
             {
-                string groupCommand = "";
-                if (req.Action == "Add")
-                {
-                    groupCommand = _cmd.Rights.Cloud.Add
-                    .Replace("{DLName}", req.DLName)
-                    .Replace("{User}", req.Rights);
-                }
-                else
-                {
-                    groupCommand = _cmd.Rights.Cloud.Remove
-                    .Replace("{DLName}", req.DLName)
-                    .Replace("{User}", req.Rights);
-                }
+                _logger.LogError(ex, "PowerShell execution FAILED");
 
-                var groupResult = RunExchangeCloudCommand(groupCommand);
-                if (!string.IsNullOrWhiteSpace(groupResult))
-                {
-                    _logger.LogInformation("Group command executed successfully. Proceeding with membership command.");
-                }
-                else
-                {
-                    _logger.LogError("Group command execution failed. Aborting membership command.");
-                    throw new Exception("Failed to execute group command. Cannot proceed with membership changes.");
-                }
-                _logger.LogInformation("Using cloud membership command template.");
+                _logger.LogError("Failed Command: {Command}", psCmd);
+
+                _logger.LogError("DLName: {DLName}, Rights: {Rights}, Action: {Action}",
+                    req.DLName, req.Rights, req.Action);
+
+                _logger.LogInformation("---- END ExecuteOnPremRights FAILURE ----");
+
+                throw new ServiceException(
+                    $"Failed to {req.Action.ToLower()} rights on DL '{req.DLName}'. Details: {ex.Message}", ex);
             }
         }
+        private void ExecuteCloudRights(DL req)
+        {
+            string template = req.Action == "Add"
+                ? _cmd.Rights.Cloud.Add
+                : _cmd.Rights.Cloud.Remove;
+
+            string psCmd = template
+                .Replace("{DLName}", req.DLName)
+                .Replace("{User}", req.Rights);
+
+            _logger.LogInformation("Executing cloud rights command. Action: {Action}, DL: {DL}", req.Action, req.DLName);
+
+            try
+            {
+                // ✅ FIX: Same as membership — no output on success, exception = failure.
+                RunExchangeCloudCommand(psCmd);
+                _logger.LogInformation("Cloud rights operation succeeded. Action: {Action}, DL: {DL}", req.Action, req.DLName);
+            }
+            catch (ServiceException ex)
+            {
+                string message = ex.InnerException?.Message ?? ex.Message;
+                _logger.LogError(ex, "Cloud rights operation failed. Action: {Action}, DL: {DL}", req.Action, req.DLName);
+                throw new ServiceException($"Failed to {req.Action.ToLower()} rights on DL '{req.DLName}' (cloud). Details: {message}", ex);
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────────
+        // ACCOUNT UNLOCK
+        // ─────────────────────────────────────────────────────────────────────────
         public void AccountUnlockCommand(DL req)
         {
-            using var scope = _logger.BeginScope(
-                "AccountUnlock | EmployeeId: {EmpId}", req.EmpIds);
+            using var scope = _logger.BeginScope("AccountUnlock | EmployeeId: {EmpId}", req.EmpIds);
 
             if (string.IsNullOrWhiteSpace(req.EmpIds))
-            {
-                _logger.LogError("EmployeeId missing.");
-                throw new ArgumentException("EmployeeId is required.");
-            }
+                throw new ServiceException("EmployeeId is required.");
 
-            string unlockCmd = _cmd.AccountUnlock.Unlock
-                .Replace("{EmpId}", req.EmpIds);
-
-            _logger.LogInformation("Executing account unlock command.");
-            _logger.LogDebug("PowerShell Unlock Command: {Command}", unlockCmd);
+            // Step 1: Unlock
+            string unlockCmd = _cmd.AccountUnlock.Unlock.Replace("{EmpId}", req.EmpIds);
+            _logger.LogInformation("Executing account unlock command for user: {EmpId}", req.EmpIds);
 
             try
             {
                 Powershell.RunPowerShell(unlockCmd);
+                _logger.LogInformation("Account unlock command executed for user: {EmpId}", req.EmpIds);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Account unlock PowerShell command failed.");
-                throw;
+                if (IsUserNotFoundError(ex.Message))
+                {
+                    _logger.LogError("User {EmpId} not found in Active Directory. Cannot unlock.", req.EmpIds);
+                    throw new ServiceException($"User '{req.EmpIds}' was not found in Active Directory.", ex);
+                }
+
+                _logger.LogError(ex, "Account unlock PowerShell command failed for user: {EmpId}", req.EmpIds);
+                throw new ServiceException($"Failed to unlock account for user '{req.EmpIds}'. Details: {ex.Message}", ex);
             }
 
-            string verifyCmd = _cmd.AccountUnlock.Verify
-                .Replace("{EmpId}", req.EmpIds);
-
-            _logger.LogInformation("Verifying account unlock status.");
-            _logger.LogDebug("PowerShell Verify Command: {Command}", verifyCmd);
+            // Step 2: Verify
+            string verifyCmd = _cmd.AccountUnlock.Verify.Replace("{EmpId}", req.EmpIds);
+            _logger.LogInformation("Verifying account unlock status for user: {EmpId}", req.EmpIds);
 
             string resultJson;
             try
@@ -276,25 +309,82 @@ namespace LombardAPI_NEW.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Account unlock verification failed.");
-                throw;
+                _logger.LogError(ex, "Account unlock verification command failed for user: {EmpId}", req.EmpIds);
+                throw new ServiceException($"Could not verify unlock status for user '{req.EmpIds}'. Details: {ex.Message}", ex);
             }
 
-            _logger.LogDebug("Verification output: {Output}", resultJson);
+            if (string.IsNullOrWhiteSpace(resultJson))
+            {
+                _logger.LogWarning("Verification returned empty output for user: {EmpId}. Assuming unlock succeeded.", req.EmpIds);
+                return;
+            }
 
-            if (!string.IsNullOrWhiteSpace(resultJson))
+            try
             {
                 var user = JsonSerializer.Deserialize<JsonElement>(resultJson);
 
                 if (user.TryGetProperty("LockedOut", out var locked) && locked.GetBoolean())
                 {
-                    _logger.LogError("Account unlock verification failed. User still locked.");
-                    throw new Exception("Account unlock failed. User is still locked.");
+                    _logger.LogError("Account unlock verification failed. User {EmpId} is still locked.", req.EmpIds);
+                    throw new ServiceException($"Account unlock failed for user '{req.EmpIds}'. The account is still locked after the operation.");
                 }
+
+                _logger.LogInformation("Account unlocked and verified successfully for user: {EmpId}", req.EmpIds);
             }
-
-            _logger.LogInformation("Account unlocked and verified successfully.");
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex, "Could not parse verification JSON for user: {EmpId}. Raw output: {Output}", req.EmpIds, resultJson);
+                // Don't fail — unlock command itself succeeded, verification parse is secondary
+            }
         }
-    }
 
+        // ─────────────────────────────────────────────────────────────────────────
+        // EXCHANGE CLOUD RUNNER
+        // ─────────────────────────────────────────────────────────────────────────
+        public string RunExchangeCloudCommand(string command)
+        {
+            try
+            {
+                string connectScript = _cmd.Membership.Cloud.ConnectScript;
+
+                if (string.IsNullOrWhiteSpace(connectScript))
+                    throw new ServiceException("Configuration error: Exchange connect script is missing.");
+
+                _logger.LogInformation("STEP 1 → Connecting to Exchange Online");
+
+                var result = Powershell.RunPowerShellCloudConnect(connectScript, command);
+
+                _logger.LogInformation("Exchange command executed successfully.");
+                return result; // may be empty — that is normal for Add/Remove commands
+            }
+            catch (ServiceException)
+            {
+                throw; // already wrapped
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Exchange Cloud command execution failed.");
+                throw new ServiceException(
+                    "Exchange Online execution failed. Possible causes: certificate issue, missing app permission, or Exchange role not assigned.",
+                    ex);
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────────
+        // ERROR CLASSIFIERS
+        // ─────────────────────────────────────────────────────────────────────────
+        private static bool IsAlreadyMemberError(string message) =>
+            message.Contains("already a member", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("already exists", StringComparison.OrdinalIgnoreCase);
+
+        private static bool IsNotMemberError(string message) =>
+            message.Contains("is not a member", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("not a member", StringComparison.OrdinalIgnoreCase);
+
+        private static bool IsUserNotFoundError(string message) =>
+            message.Contains("Cannot find an object", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("couldn't be found", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("recipient", StringComparison.OrdinalIgnoreCase) &&
+            message.Contains("not found", StringComparison.OrdinalIgnoreCase);
+    }
 }

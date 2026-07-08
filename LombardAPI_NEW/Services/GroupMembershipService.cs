@@ -162,6 +162,18 @@ namespace LombardAPI_NEW.Services
 
         public async Task<AddOrRemoveDLMembershipDTO> GetByDLNameAsync(string dlName)
         {
+
+            //AddOrRemoveDLMembershipDTO dto = new AddOrRemoveDLMembershipDTO()
+            //{
+            //    DLName = "Finance_DL",
+            //    DLOwner = "AYUSH.KAMBLE",
+            //    Action = "Add",
+            //    //Rights = "SendAs",
+            //    Source = "Cloud",
+            //    SendMailAccess = "Allow",
+            //    GroupOwnershipChange = "Deny"
+            //};
+            //return dto;
             using var scope = _logger.BeginScope("GetByDLNameAsync | DLName: {DLName}", dlName);
 
             try
