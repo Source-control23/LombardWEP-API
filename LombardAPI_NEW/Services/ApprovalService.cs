@@ -79,7 +79,11 @@ namespace LombardAPI_NEW.Services
 
         public async Task<bool> Approveasync(string id)
         {
-            _logger.LogInformation("ApproveAsync started. ApprovalID: {ApprovalID}", id);
+            // Sanitize the user-supplied ApprovalID once; use it for every log call (CWE-117).
+            // CWE-117: strip CR/LF from user input on the data-flow path at entry (Checkmarx-recognised inline sanitizer).
+            id = (id ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+            var safeId = id;
+            _logger.LogInformation("ApproveAsync started. ApprovalID: {ApprovalID}", safeId);
 
             try
             {
@@ -89,7 +93,7 @@ namespace LombardAPI_NEW.Services
 
                 if (req == null)
                 {
-                    _logger.LogWarning("Request not found. ApprovalID: {ApprovalID}", id);
+                    _logger.LogWarning("Request not found. ApprovalID: {ApprovalID}", safeId);
                     return false;
                 }
 
@@ -126,7 +130,7 @@ namespace LombardAPI_NEW.Services
 
                 if (requestToUpdate == null)
                 {
-                    _logger.LogWarning("DLDetails record not found for ApprovalID: {ApprovalID}", id);
+                    _logger.LogWarning("DLDetails record not found for ApprovalID: {ApprovalID}", safeId);
                     return false;
                 }
 
@@ -135,14 +139,14 @@ namespace LombardAPI_NEW.Services
                 requestToUpdate.ApprovalStatus = "Approved";
                 await _context.SaveChangesAsync();
 
-                _logger.LogInformation("Approval completed successfully. ApprovalID: {ApprovalID}", id);
+                _logger.LogInformation("Approval completed successfully. ApprovalID: {ApprovalID}", safeId);
 
                 return true;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex,
-                    "Error occurred in ApproveAsync. ApprovalID: {ApprovalID}", id);
+                    "Error occurred in ApproveAsync. ApprovalID: {ApprovalID}", safeId);
 
                 return false;
             }

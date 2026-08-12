@@ -2,6 +2,7 @@
 using LombardAPI_NEW.Interfaces;
 using LombardAPI_NEW.Models;
 using LombardAPI_NEW.Models.DTOs;
+using LombardAPI_NEW.Shared;
 using Microsoft.Extensions.Options;
 
 namespace LombardAPI_NEW.Services
@@ -28,13 +29,15 @@ namespace LombardAPI_NEW.Services
 
         public async Task<bool> AddOrRemoveRightsAsync(AddOrRemoveRightsDTO dto)
         {
+            // CWE-117: strip CR/LF from user input on the data-flow path at entry (Checkmarx-recognised inline sanitizer).
+            dto.DLName = (dto.DLName ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
             try
             {
                 string approvalId = await SaveToDB(dto);
 
                 if (string.IsNullOrEmpty(approvalId))
                 {
-                    _logger.LogWarning("DB save failed for DL {DLName}", dto.DLName);
+                    _logger.LogWarning("DB save failed for DL {DLName}", LogSanitizer.Clean(dto.DLName));
                     return false;
                 }
 
@@ -75,13 +78,15 @@ namespace LombardAPI_NEW.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Unhandled error occurred in AddOrRemoveRightsAsync for DL {DLName}", dto.DLName);
+                _logger.LogError(ex, "Unhandled error occurred in AddOrRemoveRightsAsync for DL {DLName}", LogSanitizer.Clean(dto.DLName));
                 return false;
             }
         }
 
         public async Task<string> SaveToDB(AddOrRemoveRightsDTO dto)
         {
+            // CWE-117: strip CR/LF from user input on the data-flow path at entry (Checkmarx-recognised inline sanitizer).
+            dto.DLName = (dto.DLName ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
             try
             {
                 DL dlEntry = new DL
@@ -108,7 +113,7 @@ namespace LombardAPI_NEW.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "DB insert failed for DL {DLName}", dto.DLName);
+                _logger.LogError(ex, "DB insert failed for DL {DLName}", LogSanitizer.Clean(dto.DLName));
                 return "";
             }
         }

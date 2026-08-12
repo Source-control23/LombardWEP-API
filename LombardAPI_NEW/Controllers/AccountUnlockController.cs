@@ -24,12 +24,25 @@ namespace LombardAPI_NEW.Controllers
 
             if (user == null)
             {
+                // Do NOT echo the raw employeeId back into the response body.
                 return NotFound(ApiResponse.Fail(
-                    $"User {employeeId} not found or PowerShell failed."
+                    "User not found or the lookup could not be completed."
                 ));
             }
 
-            return Ok(ApiResponse.Ok(user));
+            // Excessive Data Exposure fix: return an explicit, whitelisted
+            // projection instead of handing the entire internal object to the
+            // API surface. Add fields here deliberately, never implicitly.
+            var response = new
+            {
+                user.EmployeeId,
+                user.IsLocked,
+                user.AccountStatus,
+                user.AccountExpiry,
+                user.PasswordExpiryStatus
+            };
+
+            return Ok(ApiResponse.Ok(response));
         }
 
         [HttpPost("unlock")]

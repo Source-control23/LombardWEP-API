@@ -45,7 +45,7 @@ namespace LombardAPI_NEW.Services
 
                 _logger.LogInformation("STEP 1 → Connecting to Exchange Online");
 
-                var connectResult = Powershell.RunPowerShellCloudConnect(connectScript,command);
+                var connectResult = Powershell.RunPowerShellCloudConnect(connectScript, command);
 
                 //if (string.IsNullOrWhiteSpace(connectResult))
                 //    _logger.LogWarning("Exchange connect returned empty output (normal behavior).");
@@ -73,7 +73,9 @@ namespace LombardAPI_NEW.Services
 
         public Task<AddOrRemoveDLMembershipDTO> GetByDLNameCloudAsync(string dlName)
         {
-            using var scope = _logger.BeginScope("Cloud DL Lookup | {DL}", dlName);
+            // CWE-117: strip CR/LF from user input on the data-flow path at entry (Checkmarx-recognised inline sanitizer).
+            dlName = (dlName ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+            using var scope = _logger.BeginScope("Cloud DL Lookup | {DL}", LogSanitizer.Clean(dlName));
 
             try
             {
@@ -91,17 +93,17 @@ namespace LombardAPI_NEW.Services
 
                 var result = RunExchangeCloudCommand(command);
 
-                _logger.LogInformation("STEP 3 → Parsing Exchange result" + result.ToString());
+                _logger.LogInformation("STEP 3 → Parsing Exchange result: {Result}", LogSanitizer.Clean(result?.ToString()));
 
                 var json = JsonSerializer.Deserialize<JsonElement>(result);
-                _logger.LogInformation("STEP 4 → Parsing result as json" + json.ToString());
+                _logger.LogInformation("STEP 4 → Parsing result as json: {Json}", LogSanitizer.Clean(json.ToString()));
                 string ownerName = json.GetProperty("OwnerName").ValueKind switch
                 {
                     JsonValueKind.Array => string.Join(", ",
                         json.GetProperty("OwnerName").EnumerateArray().Select(x => x.GetString())),
                     _ => json.GetProperty("OwnerName").GetString()
                 };
-                _logger.LogInformation("OWner" + ownerName.ToString());
+                _logger.LogInformation("Owner: {Owner}", LogSanitizer.Clean(ownerName?.ToString()));
                 string ownerEmail = json.GetProperty("OwnerEmail").ValueKind switch
                 {
                     JsonValueKind.Array => string.Join(", ",
@@ -162,6 +164,8 @@ namespace LombardAPI_NEW.Services
 
         public async Task<AddOrRemoveDLMembershipDTO> GetByDLNameAsync(string dlName)
         {
+            // CWE-117: strip CR/LF from user input on the data-flow path at entry (Checkmarx-recognised inline sanitizer).
+            dlName = (dlName ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
 
             //AddOrRemoveDLMembershipDTO dto = new AddOrRemoveDLMembershipDTO()
             //{
@@ -174,7 +178,7 @@ namespace LombardAPI_NEW.Services
             //    GroupOwnershipChange = "Deny"
             //};
             //return dto;
-            using var scope = _logger.BeginScope("GetByDLNameAsync | DLName: {DLName}", dlName);
+            using var scope = _logger.BeginScope("GetByDLNameAsync | DLName: {DLName}", LogSanitizer.Clean(dlName));
 
             try
             {
@@ -189,12 +193,12 @@ namespace LombardAPI_NEW.Services
                 _logger.LogInformation("Executing Get-ADGroup command.");
 
                 string groupCommand = _cmd.Membership.OnPrem.Get.Replace("{dlName}", dlName);
-               // string groupCommand = $"Get-ADGroup -Identity \"{dlName}\" -Properties ManagedBy | ConvertTo-Json -Depth 5";
+                // string groupCommand = $"Get-ADGroup -Identity \"{dlName}\" -Properties ManagedBy | ConvertTo-Json -Depth 5";
 
                 _logger.LogDebug("Group PS Command: {Command}", groupCommand);
 
                 var groupResult = Powershell.RunPowerShell(groupCommand);
-                _logger.LogInformation($"GroupResult from cmd : {groupResult}");
+                _logger.LogInformation("GroupResult from cmd : {GroupResult}", LogSanitizer.Clean(groupResult));
                 groupResult = string.Join("", groupResult.Select(r => r.ToString()));
 
                 _logger.LogDebug(
@@ -247,9 +251,9 @@ namespace LombardAPI_NEW.Services
                 _logger.LogInformation("Executing Get-ADUser command.");
 
                 string ownerCommand = _cmd.Membership.OnPrem.ManagedBy.Replace("{managedByDn}", managedByDn);
-    //            string ownerCommand =
-    //$"Get-ADUser -Identity \"{managedByDn}\" -Properties DisplayName,SamAccountName | " +
-    //                "Select-Object DisplayName,SamAccountName | ConvertTo-Json";
+                //            string ownerCommand =
+                //$"Get-ADUser -Identity \"{managedByDn}\" -Properties DisplayName,SamAccountName | " +
+                //                "Select-Object DisplayName,SamAccountName | ConvertTo-Json";
 
                 _logger.LogDebug("Owner PS Command: {Command}", ownerCommand);
 
@@ -523,7 +527,7 @@ namespace LombardAPI_NEW.Services
 
         public async Task<bool> AddOrRemoveDLMembershipAsync(AddOrRemoveDLMembershipDTO dto)
         {
-            using var scope = _logger.BeginScope(new { dto.DLName, dto.Action });
+            using var scope = _logger.BeginScope(new { DLName = LogSanitizer.Clean(dto.DLName), Action = LogSanitizer.Clean(dto.Action) });
             try
             {
                 if (dto == null)
@@ -604,12 +608,14 @@ namespace LombardAPI_NEW.Services
 
         private async Task<string> SaveToDB(AddOrRemoveDLMembershipDTO dto)
         {
+            // CWE-117: strip CR/LF from user input on the data-flow path at entry (Checkmarx-recognised inline sanitizer).
+            dto.DLName = (dto.DLName ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
             try
             {
                 DL dl = null;
                 if (dto.Source == "OnPrem")
                 {
-                     dl = new DL
+                    dl = new DL
                     {
                         ApprovalID = Guid.NewGuid().ToString(),
                         Event = "Membership | OnPrem",
@@ -641,7 +647,7 @@ namespace LombardAPI_NEW.Services
                         ApproverEmail = ""
                     };
                 }
-               
+
 
                 await _context.DLDetails.AddAsync(dl);
                 await _context.SaveChangesAsync();
@@ -651,7 +657,7 @@ namespace LombardAPI_NEW.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Database save failed for DL: {DLName}", dto.DLName);
+                _logger.LogError(ex, "Database save failed for DL: {DLName}", LogSanitizer.Clean(dto.DLName));
                 return "";
             }
         }

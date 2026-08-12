@@ -2,6 +2,7 @@
 using LombardAPI_NEW.Interfaces;
 using LombardAPI_NEW.Models;
 using LombardAPI_NEW.Models.DTOs;
+using LombardAPI_NEW.Shared;
 using Microsoft.AspNetCore.Mvc;
 
 [ApiController]
@@ -23,7 +24,7 @@ public class GroupMembershipController : ControllerBase
     {
         using var scope = _logger.BeginScope(new Dictionary<string, object>
         {
-            ["DLName"] = dlName
+            ["DLName"] = LogSanitizer.Clean(dlName)
         });
 
         try
@@ -70,8 +71,8 @@ public class GroupMembershipController : ControllerBase
     {
         using var scope = _logger.BeginScope(new Dictionary<string, object>
         {
-            ["DLName"] = dto?.DLName,
-            ["Action"] = dto?.Action
+            ["DLName"] = LogSanitizer.Clean(dto?.DLName),
+            ["Action"] = LogSanitizer.Clean(dto?.Action)
         });
 
         try

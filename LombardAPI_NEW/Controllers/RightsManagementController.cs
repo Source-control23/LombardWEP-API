@@ -1,5 +1,6 @@
 ﻿using LombardAPI_NEW.Interfaces;
 using LombardAPI_NEW.Models.DTOs;
+using LombardAPI_NEW.Shared;
 using Microsoft.AspNetCore.Mvc;
 
 namespace LombardAPI_NEW.Controllers
@@ -35,7 +36,7 @@ namespace LombardAPI_NEW.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to fetch DL details for {DLName}", dlName);
+                _logger.LogError(ex, "Failed to fetch DL details for {DLName}", LogSanitizer.Clean(dlName));
                 return StatusCode(500, new { Message = "Internal server error." });
             }
         }
@@ -57,7 +58,7 @@ namespace LombardAPI_NEW.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Unexpected error during rights update for DL {DLName}", dto.DLName);
+                _logger.LogError(ex, "Unexpected error during rights update for DL {DLName}", LogSanitizer.Clean(dto.DLName));
                 return StatusCode(500, new { Message = "Internal server error." });
             }
         }
