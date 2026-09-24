@@ -257,6 +257,16 @@ namespace LombardAPI_NEW.Services
         {
             List<string> result = new List<string>();
 
+            // SECURITY (PowerShell/LDAP injection fix): the search value flows into a
+            // PowerShell Get-ADUser command. Neutralise it before use. A legitimate search
+            // term (name / email / employee id) only contains letters, digits, spaces and
+            // a few safe symbols. Strip everything else so it cannot break out of the
+            // -Filter expression or inject additional PowerShell.
+            value = SanitizeSearchValue(value);
+
+            if (string.IsNullOrWhiteSpace(value))
+                throw new ArgumentException("Search value is invalid after sanitisation.");
+
             string template = parameter switch
             {
                 GALSearchEnum.EmpId => _cmd.GAL.EmpId,
@@ -286,6 +296,26 @@ namespace LombardAPI_NEW.Services
             return result;
         }
 
+        // Allow only characters that appear in real names, emails and employee IDs.
+        // Removes quotes, parentheses, braces, wildcards, backslashes, and shell
+        // metacharacters ( " ' ( ) { } * \ | & ; $ < > ` and CR/LF ) that an attacker
+        // would need to break out of the AD filter or inject PowerShell.
+        private static string SanitizeSearchValue(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+
+            // Whitelist: letters, digits, space, and . _ - @
+            var cleaned = System.Text.RegularExpressions.Regex.Replace(
+                value, @"[^\p{L}\p{Nd}\s._\-@]", string.Empty);
+
+            // Collapse whitespace and cap the length to a sane maximum.
+            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"\s+", " ").Trim();
+            if (cleaned.Length > 100)
+                cleaned = cleaned.Substring(0, 100);
+
+            return cleaned;
+        }
         private string SafeSnippet(string input, int length = 200)
         {
             if (string.IsNullOrEmpty(input))

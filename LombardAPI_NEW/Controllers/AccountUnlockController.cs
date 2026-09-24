@@ -1,11 +1,14 @@
 ﻿using LombardAPI_NEW.Interfaces;
 using LombardAPI_NEW.Models;
 using LombardAPI_NEW.Models.DTOs;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace LombardAPI_NEW.Controllers
 {
+    [Authorize]
     [ApiController]
     [Route("api/account-unlock")]
     public class AccountUnlockController : ControllerBase
@@ -17,22 +20,28 @@ namespace LombardAPI_NEW.Controllers
             _service = service;
         }
 
+        // Checks raw token claims directly — immune to RoleClaimType mapping issues.
+        private bool HasFeatureAccess() =>
+            User.Claims.Any(c =>
+                (c.Type == "roles" || c.Type == "role" ||
+                 c.Type.EndsWith("/role") || c.Type.EndsWith("/roles"))
+                && c.Value == "Feature.Access");
+
         [HttpGet("{employeeId}")]
         public async Task<IActionResult> GetStatus(string employeeId)
         {
+            if (!HasFeatureAccess())
+                return Forbid();
+
             var user = await _service.GetUserDetailsAsync(employeeId);
 
             if (user == null)
             {
-                // Do NOT echo the raw employeeId back into the response body.
                 return NotFound(ApiResponse.Fail(
                     "User not found or the lookup could not be completed."
                 ));
             }
 
-            // Excessive Data Exposure fix: return an explicit, whitelisted
-            // projection instead of handing the entire internal object to the
-            // API surface. Add fields here deliberately, never implicitly.
             var response = new
             {
                 user.EmployeeId,
@@ -48,9 +57,11 @@ namespace LombardAPI_NEW.Controllers
         [HttpPost("unlock")]
         public async Task<IActionResult> Unlock([FromBody] AccountUnlockRequestDTO request)
         {
+            if (!HasFeatureAccess())
+                return Forbid();
+
             var result = await _service.UnlockAccountAsync(request);
             return Ok(result);
         }
     }
-
 }

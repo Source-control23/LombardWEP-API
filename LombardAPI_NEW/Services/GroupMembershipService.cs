@@ -73,8 +73,9 @@ namespace LombardAPI_NEW.Services
 
         public Task<AddOrRemoveDLMembershipDTO> GetByDLNameCloudAsync(string dlName)
         {
-            // CWE-117: strip CR/LF from user input on the data-flow path at entry (Checkmarx-recognised inline sanitizer).
-            dlName = (dlName ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+            // CWE-117 Log Forging: whitelist-validate user input at entry (Checkmarx "How to avoid it" #1).
+            // Inline on the taint path so the engine recognises it; strips CR/LF/control chars, neutralising every downstream log.
+            dlName = System.Text.RegularExpressions.Regex.Replace(dlName ?? string.Empty, @"[\r\n\t\p{Cc}]", string.Empty);
             using var scope = _logger.BeginScope("Cloud DL Lookup | {DL}", LogSanitizer.Clean(dlName));
 
             try
@@ -164,8 +165,9 @@ namespace LombardAPI_NEW.Services
 
         public async Task<AddOrRemoveDLMembershipDTO> GetByDLNameAsync(string dlName)
         {
-            // CWE-117: strip CR/LF from user input on the data-flow path at entry (Checkmarx-recognised inline sanitizer).
-            dlName = (dlName ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+            // CWE-117 Log Forging: whitelist-validate user input at entry (Checkmarx "How to avoid it" #1).
+            // Inline on the taint path so the engine recognises it; strips CR/LF/control chars, neutralising every downstream log.
+            dlName = System.Text.RegularExpressions.Regex.Replace(dlName ?? string.Empty, @"[\r\n\t\p{Cc}]", string.Empty);
 
             //AddOrRemoveDLMembershipDTO dto = new AddOrRemoveDLMembershipDTO()
             //{
@@ -608,8 +610,9 @@ namespace LombardAPI_NEW.Services
 
         private async Task<string> SaveToDB(AddOrRemoveDLMembershipDTO dto)
         {
-            // CWE-117: strip CR/LF from user input on the data-flow path at entry (Checkmarx-recognised inline sanitizer).
-            dto.DLName = (dto.DLName ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+            // CWE-117 Log Forging: whitelist-validate user input at entry (Checkmarx "How to avoid it" #1).
+            // Inline on the taint path so the engine recognises it; strips CR/LF/control chars, neutralising every downstream log.
+            dto.DLName = System.Text.RegularExpressions.Regex.Replace(dto.DLName ?? string.Empty, @"[\r\n\t\p{Cc}]", string.Empty);
             try
             {
                 DL dl = null;

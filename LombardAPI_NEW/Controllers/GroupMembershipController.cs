@@ -3,8 +3,11 @@ using LombardAPI_NEW.Interfaces;
 using LombardAPI_NEW.Models;
 using LombardAPI_NEW.Models.DTOs;
 using LombardAPI_NEW.Shared;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Linq;
 
+[Authorize]
 [ApiController]
 [Route("api/[controller]")]
 public class GroupMembershipController : ControllerBase
@@ -18,10 +21,18 @@ public class GroupMembershipController : ControllerBase
         _logger = logger;
     }
 
+    private bool HasFeatureAccess() =>
+        User.Claims.Any(c =>
+            (c.Type == "roles" || c.Type == "role" ||
+             c.Type.EndsWith("/role") || c.Type.EndsWith("/roles"))
+            && c.Value == "Feature.Access");
 
     [HttpGet("{dlName}")]
     public async Task<IActionResult> GetMembers(string dlName, [FromQuery] string source)
     {
+        if (!HasFeatureAccess())
+            return Forbid();
+
         using var scope = _logger.BeginScope(new Dictionary<string, object>
         {
             ["DLName"] = LogSanitizer.Clean(dlName)
@@ -69,6 +80,9 @@ public class GroupMembershipController : ControllerBase
     [HttpPost("AddOrRemoveDLMembership")]
     public async Task<IActionResult> AddOrRemove(AddOrRemoveDLMembershipDTO dto)
     {
+        if (!HasFeatureAccess())
+            return Forbid();
+
         using var scope = _logger.BeginScope(new Dictionary<string, object>
         {
             ["DLName"] = LogSanitizer.Clean(dto?.DLName),
@@ -101,11 +115,14 @@ public class GroupMembershipController : ControllerBase
             return StatusCode(500, ApiResponse.Fail("Unexpected internal error."));
         }
     }
+
     [HttpGet("TestDB")]
     public async Task<IActionResult> TestDB()
     {
+        if (!HasFeatureAccess())
+            return Forbid();
+
         var res = await _service.TestDBConnectionAsync();
         return Ok(res);
     }
-
 }

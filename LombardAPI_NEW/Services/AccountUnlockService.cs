@@ -40,8 +40,9 @@ namespace LombardAPI_NEW.Services
             //return mock;
 
             // Sanitize user-controlled employeeId before it reaches any log sink (CWE-117).
-            // CWE-117: strip CR/LF from user input on the data-flow path at entry (Checkmarx-recognised inline sanitizer).
-            employeeId = (employeeId ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+            // CWE-117 Log Forging: whitelist-validate user input at entry (Checkmarx "How to avoid it" #1).
+            // Inline on the taint path so the engine recognises it; strips CR/LF/control chars, neutralising every downstream log.
+            employeeId = System.Text.RegularExpressions.Regex.Replace(employeeId ?? string.Empty, @"[^A-Za-z0-9._\-]", string.Empty);
             var safeEmployeeId = employeeId;
 
             using var scope = _logger.BeginScope(
@@ -233,8 +234,9 @@ namespace LombardAPI_NEW.Services
         }
         public async Task<ApiResponse> UnlockAccountAsync(AccountUnlockRequestDTO request)
         {
-            // CWE-117: strip CR/LF from user input on the data-flow path at entry (Checkmarx-recognised inline sanitizer).
-            request.EmployeeId = (request.EmployeeId ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+            // CWE-117 Log Forging: whitelist-validate user input at entry (Checkmarx "How to avoid it" #1).
+            // Inline on the taint path so the engine recognises it; strips CR/LF/control chars, neutralising every downstream log.
+            request.EmployeeId = System.Text.RegularExpressions.Regex.Replace(request.EmployeeId ?? string.Empty, @"[^A-Za-z0-9._\-]", string.Empty);
             string unlockCmd = _cmd.AccountUnlock.Unlock
                .Replace("{EmpId}", request.EmployeeId);
 

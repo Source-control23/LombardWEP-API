@@ -1,11 +1,7 @@
-﻿namespace LombardAPI_NEW.Middlewares
+namespace LombardAPI_NEW.Middlewares
 {
     /// <summary>
     /// Adds standard security response headers to every response.
-    /// Resolves the Checkmarx findings:
-    ///   - Missing Content Security Policy      -> Content-Security-Policy
-    ///   - Missing Framing Policy / Clickjacking -> X-Frame-Options + frame-ancestors
-    /// and hardens the API generally (MIME sniffing, referrer leakage).
     /// </summary>
     public class SecurityHeadersMiddleware
     {
@@ -20,19 +16,31 @@
         {
             var headers = context.Response.Headers;
 
-            // Clickjacking / framing: disallow the API from being framed at all.
             headers["X-Frame-Options"] = "DENY";
-
-            // Content Security Policy. This is an API (no HTML UI), so a restrictive
-            // default is safe. frame-ancestors 'none' is the modern clickjacking control.
             headers["Content-Security-Policy"] =
                 "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
-
-            // Stop browsers MIME-sniffing responses away from the declared content type.
             headers["X-Content-Type-Options"] = "nosniff";
-
-            // Do not leak full URLs (which may carry ids) in the Referer header.
             headers["Referrer-Policy"] = "no-referrer";
+            headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
+
+            // Restrict powerful browser features this API never needs.
+            headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()";
+
+            // Sensitive API data must not be cached by browsers or proxies.
+            headers["Cache-Control"] = "no-store";
+            headers["Pragma"] = "no-cache";
+
+            // Additional headers Burp checks for (cross-domain / cross-origin isolation).
+            headers["X-Permitted-Cross-Domain-Policies"] = "none";
+            headers["Cross-Origin-Opener-Policy"] = "same-origin";
+            headers["Cross-Origin-Resource-Policy"] = "same-origin";
+
+            // Explicitly appease the legacy scanner checks
+            headers["X-XSS-Protection"] = "1; mode=block";
+
+            // Force strip information disclosure elements from the response
+            headers.Remove("Server");
+            headers.Remove("X-Powered-By");
 
             await _next(context);
         }

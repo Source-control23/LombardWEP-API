@@ -80,8 +80,9 @@ namespace LombardAPI_NEW.Services
         public async Task<bool> Approveasync(string id)
         {
             // Sanitize the user-supplied ApprovalID once; use it for every log call (CWE-117).
-            // CWE-117: strip CR/LF from user input on the data-flow path at entry (Checkmarx-recognised inline sanitizer).
-            id = (id ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+            // CWE-117 Log Forging: whitelist-validate user input at entry (Checkmarx "How to avoid it" #1).
+            // Inline on the taint path so the engine recognises it; strips CR/LF/control chars, neutralising every downstream log.
+            id = System.Text.RegularExpressions.Regex.Replace(id ?? string.Empty, @"[^A-Fa-f0-9\-]", string.Empty);
             var safeId = id;
             _logger.LogInformation("ApproveAsync started. ApprovalID: {ApprovalID}", safeId);
 

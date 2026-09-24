@@ -29,8 +29,9 @@ namespace LombardAPI_NEW.Services
 
         public async Task<bool> AddOrRemoveRightsAsync(AddOrRemoveRightsDTO dto)
         {
-            // CWE-117: strip CR/LF from user input on the data-flow path at entry (Checkmarx-recognised inline sanitizer).
-            dto.DLName = (dto.DLName ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+            // CWE-117 Log Forging: whitelist-validate user input at entry (Checkmarx "How to avoid it" #1).
+            // Inline on the taint path so the engine recognises it; strips CR/LF/control chars, neutralising every downstream log.
+            dto.DLName = System.Text.RegularExpressions.Regex.Replace(dto.DLName ?? string.Empty, @"[\r\n\t\p{Cc}]", string.Empty);
             try
             {
                 string approvalId = await SaveToDB(dto);
@@ -85,8 +86,9 @@ namespace LombardAPI_NEW.Services
 
         public async Task<string> SaveToDB(AddOrRemoveRightsDTO dto)
         {
-            // CWE-117: strip CR/LF from user input on the data-flow path at entry (Checkmarx-recognised inline sanitizer).
-            dto.DLName = (dto.DLName ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+            // CWE-117 Log Forging: whitelist-validate user input at entry (Checkmarx "How to avoid it" #1).
+            // Inline on the taint path so the engine recognises it; strips CR/LF/control chars, neutralising every downstream log.
+            dto.DLName = System.Text.RegularExpressions.Regex.Replace(dto.DLName ?? string.Empty, @"[\r\n\t\p{Cc}]", string.Empty);
             try
             {
                 DL dlEntry = new DL

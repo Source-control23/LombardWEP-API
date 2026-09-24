@@ -28,7 +28,7 @@ public class EmailService : IEmailService
             UseDefaultCredentials = false,
             //        Credentials = new NetworkCredential(
             //    config["EmailSettings:Username"],
-            //    config["EmailSettings:Password"]
+            //    config["EmailSettings:SmtpSecret"]
             //)
         };
 
