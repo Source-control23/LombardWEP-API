@@ -28,13 +28,17 @@ namespace LombardAPI_NEW.Services
 
         public async Task<bool> AddOrRemoveRightsAsync(AddOrRemoveRightsDTO dto)
         {
+            // CWE-117 Log Forging: whitelist-validate user input at entry (Checkmarx "How to avoid it" #1).
+            // Inline on the taint path so the engine recognises it; strips CR/LF/control chars, neutralising every downstream log.
+            dto.DLName = System.Text.RegularExpressions.Regex.Replace(dto.DLName ?? string.Empty, @"[\r\n\t\p{Cc}]", string.Empty);
+
             try
             {
                 string approvalId = await SaveToDB(dto);
 
                 if (string.IsNullOrEmpty(approvalId))
                 {
-                    _logger.LogWarning("DB save failed for DL {DLName}", dto.DLName);
+                    _logger.LogWarning("DB save failed for DL {DLName}", System.Text.RegularExpressions.Regex.Replace(dto.DLName ?? string.Empty, @"[\r\n\t\p{Cc}]", string.Empty));
                     return false;
                 }
 
@@ -47,14 +51,14 @@ namespace LombardAPI_NEW.Services
     <p>A new <strong>DL Rights Approval</strong> requires your review.</p>
 
     <p style='margin:20px 0;'>
-        <a href='{link}' 
+        <a href='{link}'
            style='background-color:#0052cc; color:#fff; padding:10px 18px;
                   text-decoration:none; border-radius:6px; font-weight:600;'>
             Open Approval Page
         </a>
     </p>
 
-    <p>If the button does not work, copy & paste this link:</p>
+    <p>If the button does not work, copy &amp; paste this link:</p>
 
     <p style='word-break:break-all; color:#0052cc;'>{link}</p>
 
@@ -63,7 +67,9 @@ namespace LombardAPI_NEW.Services
     <p style='font-size:12px; color:#777;'>This is an automated email. Please do not reply.</p>
 </div>";
 
-                bool emailSent = await _emailService.SendEmailAsync("", "DL Rights Approval", body);
+                // Send to DL owner. dto.DLOwner is already saved to DB (DLOWner column).
+                // EmailService falls back to config ToEmail if DLOwner is blank.
+                bool emailSent = await _emailService.SendEmailAsync(dto.DLOwner ?? "", "DL Rights Approval", body);
 
                 if (!emailSent)
                 {
@@ -75,13 +81,17 @@ namespace LombardAPI_NEW.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Unhandled error occurred in AddOrRemoveRightsAsync for DL {DLName}", dto.DLName);
+                _logger.LogError(ex, "Unhandled error occurred in AddOrRemoveRightsAsync for DL {DLName}", System.Text.RegularExpressions.Regex.Replace(dto.DLName ?? string.Empty, @"[\r\n\t\p{Cc}]", string.Empty));
                 return false;
             }
         }
 
         public async Task<string> SaveToDB(AddOrRemoveRightsDTO dto)
         {
+            // CWE-117 Log Forging: whitelist-validate user input at entry (Checkmarx "How to avoid it" #1).
+            // Inline on the taint path so the engine recognises it; strips CR/LF/control chars, neutralising every downstream log.
+            dto.DLName = System.Text.RegularExpressions.Regex.Replace(dto.DLName ?? string.Empty, @"[\r\n\t\p{Cc}]", string.Empty);
+
             try
             {
                 DL dlEntry = new DL
@@ -108,7 +118,7 @@ namespace LombardAPI_NEW.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "DB insert failed for DL {DLName}", dto.DLName);
+                _logger.LogError(ex, "DB insert failed for DL {DLName}", System.Text.RegularExpressions.Regex.Replace(dto.DLName ?? string.Empty, @"[\r\n\t\p{Cc}]", string.Empty));
                 return "";
             }
         }

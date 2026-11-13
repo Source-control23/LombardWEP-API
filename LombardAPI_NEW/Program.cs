@@ -30,7 +30,14 @@ builder.Logging.AddSerilog(logger);
 // Database
 builder.Services.AddDbContext<DataBaseContext>(options =>
     options.UseNpgsql(
-        builder.Configuration.GetConnectionString("DefaultConnection")
+        builder.Configuration.GetConnectionString("DefaultConnection"),
+        npgsqlOptions => npgsqlOptions
+            .CommandTimeout(60)  // Increased from default 30 to 60 seconds
+            .EnableRetryOnFailure(
+                maxRetryCount: 3,
+                maxRetryDelay: TimeSpan.FromSeconds(10),
+                errorCodesToAdd: null
+            )
     )
 );
 

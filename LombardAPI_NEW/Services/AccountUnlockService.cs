@@ -153,7 +153,7 @@ namespace LombardAPI_NEW.Services
             {
                 if (DateTime.TryParse(pwdProp.ToString(), out var lastSet))
                 {
-                    var expiry = lastSet.AddDays(60);
+                    var expiry = lastSet.AddDays(45);// from 60 to 45 days as per policy 
 
                     passwordStatus = expiry < DateTime.UtcNow
                         ? "Password Expired"

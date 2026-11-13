@@ -1,7 +1,5 @@
-﻿using LombardAPI_NEW.Services;
-using System.Net;
+﻿using System.Net;
 using System.Net.Mail;
-using System.Threading.Tasks;
 
 public interface IEmailService
 {
@@ -12,13 +10,15 @@ public class EmailService : IEmailService
 {
     private readonly SmtpClient _smtpClient;
     private readonly string _fromEmail;
-    private readonly string? _toEmail;
+    private readonly string? _toEmail;          // config fallback (kept for safety)
     private readonly ILogger<EmailService> _logger;
+
     public EmailService(IConfiguration config, ILogger<EmailService> logger)
     {
         _fromEmail = config["EmailSettings:FromEmail"];
-        _toEmail = config["EmailSettings:ToEmail"];
+        _toEmail = config["EmailSettings:ToEmail"];   // fallback only
         _logger = logger;
+
         _smtpClient = new SmtpClient
         {
             Host = config["EmailSettings:SmtpHost"],
@@ -26,18 +26,29 @@ public class EmailService : IEmailService
             EnableSsl = false,
             DeliveryMethod = SmtpDeliveryMethod.Network,
             UseDefaultCredentials = false,
-            //        Credentials = new NetworkCredential(
-            //    config["EmailSettings:Username"],
-            //    config["EmailSettings:Password"]
-            //)
+            //  Credentials = new NetworkCredential(
+            //      config["EmailSettings:Username"],
+            //      config["EmailSettings:SmtpSecret"]   // read from IIS env var, not appsettings
+            //  )
         };
-
     }
+
     public async Task<bool> SendEmailAsync(string toEmail, string subject, string bodyHtml)
     {
         try
         {
-            _logger.LogInformation("Email Method started.");
+            _logger.LogInformation("Email method started.");
+
+            // Use the caller-supplied address when available;
+            // fall back to the config default so existing flows keep working.
+            string recipient = !string.IsNullOrWhiteSpace(toEmail) ? toEmail : _toEmail;
+
+            if (string.IsNullOrWhiteSpace(recipient))
+            {
+                _logger.LogError("No recipient address available — toEmail param and config ToEmail are both empty.");
+                return false;
+            }
+
             var mail = new MailMessage
             {
                 From = new MailAddress(_fromEmail),
@@ -46,14 +57,14 @@ public class EmailService : IEmailService
                 IsBodyHtml = true
             };
 
-            mail.To.Add(_toEmail);
+            mail.To.Add(recipient);
 
             await _smtpClient.SendMailAsync(mail);
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Eror while sending email : {ex}");
+            _logger.LogError(ex, "Error while sending email to {Recipient}", toEmail);
             return false;
         }
     }
