@@ -23,7 +23,12 @@ namespace LombardAPI_NEW.Models
 
         public string ApprovalStatus { get; set; } = "Pending"; 
         public string? ApproverEmail { get; set; }          
-        public DateTime? ApprovalTime { get; set; }        
+        public DateTime? ApprovalTime { get; set; }
+
+        // Requestor (logged-in user who raised the request). Nullable so that
+        // rows created before this column existed remain valid.
+        public string? RequestorId { get; set; }
+        public string? RequestorName { get; set; }
     }
 
 }

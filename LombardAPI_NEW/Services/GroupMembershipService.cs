@@ -19,17 +19,26 @@ namespace LombardAPI_NEW.Services
         private readonly ILogger<GroupMembershipService> _logger;
         private readonly PowerShellCommandSettings _cmd;
         private readonly CommonService _commonService;
+        private readonly IMembershipNotificationService _notificationService;
+        private readonly EmailRecipientResolver _recipientResolver;
+        private readonly IHttpContextAccessor _httpContextAccessor;
 
         public GroupMembershipService(CommonService commonService,
             DataBaseContext context,
             IEmailService emailService,
-            ILogger<GroupMembershipService> logger, IOptions<PowerShellCommandSettings> options)
+            ILogger<GroupMembershipService> logger, IOptions<PowerShellCommandSettings> options,
+            IMembershipNotificationService notificationService,
+            EmailRecipientResolver recipientResolver,
+            IHttpContextAccessor httpContextAccessor)
         {
             _context = context;
             _emailService = emailService;
             _logger = logger;
             _cmd = options.Value;
             _commonService = commonService;
+            _notificationService = notificationService;
+            _recipientResolver = recipientResolver;
+            _httpContextAccessor = httpContextAccessor;
         }
 
         public string RunExchangeCloudCommand(string command)
@@ -523,68 +532,32 @@ namespace LombardAPI_NEW.Services
 
         public async Task<bool> AddOrRemoveDLMembershipAsync(AddOrRemoveDLMembershipDTO dto)
         {
+            if (dto == null)
+                throw new ServiceException("Invalid request payload.");
+
             using var scope = _logger.BeginScope(new { dto.DLName, dto.Action });
             try
             {
-                if (dto == null)
-                    throw new ServiceException("Invalid request payload.");
-                _logger.LogInformation("Saving DL request into DB...");
-                string savedId = await SaveToDB(dto);
+                ValidateMembershipRequest(dto);
+                ResolveRequestor(dto);
 
-                if (string.IsNullOrEmpty(savedId))
+                // The DL owner is the approver, so it is always re-resolved from the directory
+                // instead of trusting the value posted by the client (prevents approver tampering).
+                _logger.LogInformation("Resolving DL owner from directory...");
+                dto.DLOwner = await ResolveDLOwnerAsync(dto);
+
+                if (_recipientResolver.ResolveOwnerEmails(dto.DLOwner).Count == 0)
+                    throw new ServiceException("Unable to determine the DL owner's email address. Approval email cannot be sent.");
+
+                _logger.LogInformation("Saving DL request into DB...");
+                DL? saved = await SaveToDB(dto);
+
+                if (saved == null)
                     throw new ServiceException("Failed to save request in DB.");
 
-                _logger.LogInformation("Sending approval email...");
+                _logger.LogInformation("Sending approval email to DL owner...");
 
-                string link = $"{_commonService.GetEmailBaseUrl()}approval?id={savedId}";
-
-                string body = $@"
-  <div style='font-family:Segoe UI,Arial,sans-serif; font-size:14px; color:#333; line-height:1.6;'>
-      
-      <p>Dear Team,</p>
-
-      <p>
-          A new <strong>DL Membership Request</strong> requires your review and approval.
-      </p>
-
-      <p>
-          Please click the button below to open the approval page:
-      </p>
-
-      <p style='margin:20px 0;'>
-          <a href='{link}' 
-             style='background-color:#0052cc; 
-                    color:#fff; 
-                    padding:10px 18px; 
-                    text-decoration:none; 
-                    border-radius:6px;
-                    font-weight:600;'>
-              Open Approval Page
-          </a>
-      </p>
-
-      <p>
-          If the button above does not work, please copy and paste the link below into your browser:
-      </p>
-
-      <p style='word-break:break-all; color:#0052cc;'>
-          {link}
-      </p>
-
-      <hr style='border:none; border-top:1px solid #e0e0e0; margin:25px 0;' />
-
-      <p style='font-size:12px; color:#777;'>
-          This is an automated notification. Please do not reply to this email.
-      </p>
-
-  </div>";
-
-
-                bool emailSent = await _emailService.SendEmailAsync(
-                     "",
-                    "DL Membership Approval",
-                    body
-                );
+                bool emailSent = await _notificationService.SendApprovalRequestAsync(saved);
 
                 if (!emailSent)
                     throw new ServiceException("Failed to send approval email.");
@@ -602,7 +575,109 @@ namespace LombardAPI_NEW.Services
             }
         }
 
-        private async Task<string> SaveToDB(AddOrRemoveDLMembershipDTO dto)
+        // Characters that would break out of / expand inside the double-quoted PowerShell templates
+        // (straight and typographic double quotes, backtick, dollar) plus control characters.
+        private static readonly char[] UnsafeDLNameChars = { '"', '“', '”', '„', '`', '$' };
+
+        private static void ValidateMembershipRequest(AddOrRemoveDLMembershipDTO dto)
+        {
+            dto.DLName = dto.DLName?.Trim();
+            if (string.IsNullOrWhiteSpace(dto.DLName) || dto.DLName.Length > 256)
+                throw new ServiceException("DL name is required.");
+
+            if (dto.DLName.IndexOfAny(UnsafeDLNameChars) >= 0 || dto.DLName.Any(char.IsControl))
+                throw new ServiceException("DL name contains invalid characters.");
+
+            // Canonicalise Action/Source: downstream code compares them case-sensitively
+            // ("Add" adds, anything else removes; "OnPrem"/"Cloud" selects the event).
+            if (string.Equals(dto.Action?.Trim(), "Add", StringComparison.OrdinalIgnoreCase))
+                dto.Action = "Add";
+            else if (string.Equals(dto.Action?.Trim(), "Remove", StringComparison.OrdinalIgnoreCase))
+                dto.Action = "Remove";
+            else
+                throw new ServiceException("Action must be either 'Add' or 'Remove'.");
+
+            if (string.Equals(dto.Source?.Trim(), "OnPrem", StringComparison.OrdinalIgnoreCase))
+                dto.Source = "OnPrem";
+            else if (string.Equals(dto.Source?.Trim(), "Cloud", StringComparison.OrdinalIgnoreCase))
+                dto.Source = "Cloud";
+            else
+                throw new ServiceException("Invalid source value. Allowed: OnPrem, Cloud.");
+
+            var empIds = EmailRecipientResolver.SplitEmployeeIds(dto.EmpIds);
+            if (empIds.Count == 0)
+                throw new ServiceException("At least one Employee/Consultant ID is required.");
+
+            if (!empIds.All(EmailRecipientResolver.IsValidEmployeeId))
+                throw new ServiceException("One or more Employee/Consultant IDs are invalid. Only letters, digits, '.', '_' and '-' are allowed.");
+
+            dto.EmpIds = string.Join(",", empIds);
+        }
+
+        /// <summary>
+        /// Requestor = currently logged-in user. When the API runs with an authenticated identity
+        /// (e.g. Windows Authentication on IIS) that identity wins; otherwise the value sent by the
+        /// frontend is used after strict validation.
+        /// </summary>
+        private void ResolveRequestor(AddOrRemoveDLMembershipDTO dto)
+        {
+            var identity = _httpContextAccessor.HttpContext?.User?.Identity;
+
+            if (identity?.IsAuthenticated == true && !string.IsNullOrWhiteSpace(identity.Name))
+            {
+                string authId = identity.Name;
+
+                int slash = authId.LastIndexOf('\\');           // DOMAIN\user
+                if (slash >= 0) authId = authId[(slash + 1)..];
+
+                int at = authId.IndexOf('@');                     // user@domain
+                if (at > 0) authId = authId[..at];
+
+                if (!string.IsNullOrWhiteSpace(dto.RequestorId) &&
+                    !string.Equals(dto.RequestorId.Trim(), authId, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogWarning("Submitted requestor differs from authenticated user. Authenticated identity will be used.");
+                }
+
+                dto.RequestorId = authId;
+            }
+
+            dto.RequestorId = dto.RequestorId?.Trim();
+            if (!EmailRecipientResolver.IsValidEmployeeId(dto.RequestorId))
+                throw new ServiceException("Requestor ID is missing or invalid.");
+
+            dto.RequestorName = dto.RequestorName?.Trim();
+            if (string.IsNullOrWhiteSpace(dto.RequestorName))
+                dto.RequestorName = dto.RequestorId;
+
+            if (dto.RequestorName!.Length > 256 || dto.RequestorName.Any(char.IsControl))
+                throw new ServiceException("Requestor name is invalid.");
+        }
+
+        private async Task<string> ResolveDLOwnerAsync(AddOrRemoveDLMembershipDTO dto)
+        {
+            AddOrRemoveDLMembershipDTO ownerInfo = dto.Source == "OnPrem"
+                ? await GetByDLNameAsync(dto.DLName!)
+                : await GetByDLNameCloudAsync(dto.DLName!);
+
+            string? resolvedOwner = ownerInfo?.DLOwner?.Trim();
+
+            if (string.IsNullOrWhiteSpace(resolvedOwner) ||
+                string.Equals(resolvedOwner, "No Owner Assigned", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ServiceException("No owner is assigned to this DL. Approval email cannot be sent.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(dto.DLOwner) &&
+                !string.Equals(dto.DLOwner.Trim(), resolvedOwner, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("Submitted DL owner differs from directory owner. Directory value will be used.");
+            }
+
+            return resolvedOwner;
+        }
+
+        private async Task<DL?> SaveToDB(AddOrRemoveDLMembershipDTO dto)
         {
             try
             {
@@ -621,7 +696,9 @@ namespace LombardAPI_NEW.Services
                         IsLocked = false,
                         CreatedTime = DateTime.UtcNow,
                         ApprovalStatus = "Pending",
-                        ApproverEmail = ""
+                        ApproverEmail = "",
+                        RequestorId = dto.RequestorId,
+                        RequestorName = dto.RequestorName
                     };
                 }
                 else if (dto.Source == "Cloud")
@@ -638,21 +715,23 @@ namespace LombardAPI_NEW.Services
                         IsLocked = false,
                         CreatedTime = DateTime.UtcNow,
                         ApprovalStatus = "Pending",
-                        ApproverEmail = ""
+                        ApproverEmail = "",
+                        RequestorId = dto.RequestorId,
+                        RequestorName = dto.RequestorName
                     };
                 }
-               
+
 
                 await _context.DLDetails.AddAsync(dl);
                 await _context.SaveChangesAsync();
 
                 _logger.LogInformation("DL request saved successfully. ApprovalID: {Id}", dl.ApprovalID);
-                return dl.ApprovalID;
+                return dl;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Database save failed for DL: {DLName}", dto.DLName);
-                return "";
+                return null;
             }
         }
     }

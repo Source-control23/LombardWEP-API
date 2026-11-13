@@ -20,6 +20,9 @@ namespace LombardAPI_NEW.Extensions
             services.AddScoped<IGAL, GALService>();
             services.AddScoped<PowershellCommandService>();
             services.AddScoped<CommonService>();
+            services.AddSingleton<LombardAPI_NEW.Shared.EmailRecipientResolver>();
+            services.AddScoped<IMembershipNotificationService, MembershipNotificationService>();
+            services.AddHttpContextAccessor();
 
             // ✅ Correct way
             services.Configure<PowerShellCommandSettings>(

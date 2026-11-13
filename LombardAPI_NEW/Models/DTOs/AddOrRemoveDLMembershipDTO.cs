@@ -9,5 +9,11 @@
         public string? Source { get; set; }
         public string? SendMailAccess { get; set; }
         public string? GroupOwnershipChange { get; set; }
+
+        // Logged-in user raising the request (sent by the frontend).
+        // RequestorId = employee / NT ID (e.g. "lomad"), used to build the requestor's email.
+        // RequestorName = display name (e.g. "ADSUPPORT /IT/ICICILOMBARD/PRBD"), used in the mail body.
+        public string? RequestorId { get; set; }
+        public string? RequestorName { get; set; }
     }
 }

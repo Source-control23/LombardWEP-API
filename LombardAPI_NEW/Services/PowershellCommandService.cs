@@ -23,7 +23,11 @@ namespace LombardAPI_NEW.Services
         // ─────────────────────────────────────────────────────────────────────────
         // GROUP MEMBERSHIP
         // ─────────────────────────────────────────────────────────────────────────
-        public void GroupMembershipCommand(DL req)
+        /// <summary>
+        /// Executes Add/Remove for each user and returns the per-user status.
+        /// Behaviour is unchanged: the first failing user still throws a ServiceException.
+        /// </summary>
+        public IReadOnlyList<MembershipExecutionResult> GroupMembershipCommand(DL req)
         {
             using var scope = _logger.BeginScope(
                 "GroupMembership | DL: {DL}, Event: {Event}, Action: {Action}",
@@ -41,15 +45,19 @@ namespace LombardAPI_NEW.Services
 
             _logger.LogInformation("Parsed users successfully. Total users to process: {UserCount}", users.Length);
 
+            var results = new List<MembershipExecutionResult>(users.Length);
+
             for (int i = 0; i < users.Length; i++)
             {
                 var user = users[i];
                 _logger.LogInformation("Processing user {CurrentIndex}/{TotalUsers}. User: {User}", i + 1, users.Length, user);
 
                 ProcessSingleMembershipUser(req, user);
+                results.Add(new MembershipExecutionResult(user, MembershipExecutionResult.Success));
             }
 
             _logger.LogInformation("GroupMembershipCommand completed successfully.");
+            return results;
         }
 
         private void ProcessSingleMembershipUser(DL req, string user)

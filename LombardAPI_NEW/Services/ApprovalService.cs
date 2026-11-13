@@ -11,12 +11,15 @@ namespace LombardAPI_NEW.Services
         private readonly DataBaseContext _context;
         private readonly PowershellCommandService _powershellcommand;
         private readonly ILogger<ApprovalService> _logger;
+        private readonly IMembershipNotificationService _notificationService;
 
-        public ApprovalService(DataBaseContext context, PowershellCommandService powershellCommand, ILogger<ApprovalService> logger)
+        public ApprovalService(DataBaseContext context, PowershellCommandService powershellCommand, ILogger<ApprovalService> logger,
+            IMembershipNotificationService notificationService)
         {
             _context = context;
             _powershellcommand = powershellCommand;
             _logger = logger;
+            _notificationService = notificationService;
         }
 
         public async Task<DL> GetRequestasync(string id)
@@ -95,10 +98,12 @@ namespace LombardAPI_NEW.Services
 
                 _logger.LogInformation("Request fetched successfully. Event: {Event}", req.Event);
 
+                IReadOnlyList<MembershipExecutionResult>? membershipResults = null;
+
                 if (req.Event == "Membership | OnPrem" || req.Event == "Membership | Cloud")
                 {
                     _logger.LogInformation("Executing GroupMembershipCommand.");
-                    _powershellcommand.GroupMembershipCommand(req);
+                    membershipResults = _powershellcommand.GroupMembershipCommand(req);
                     _logger.LogInformation("GroupMembershipCommand executed successfully.");
                 }
                 else if (req.Event == "Rights | OnPrem" || req.Event == "Rights | Cloud")
@@ -136,6 +141,22 @@ namespace LombardAPI_NEW.Services
                 await _context.SaveChangesAsync();
 
                 _logger.LogInformation("Approval completed successfully. ApprovalID: {ApprovalID}", id);
+
+                // Completion email to the requestor (requested IDs in CC). The change is already
+                // executed and persisted, so a mail failure is logged but does not fail the approval.
+                if (membershipResults != null)
+                {
+                    try
+                    {
+                        bool sent = await _notificationService.SendCompletionAsync(requestToUpdate, membershipResults);
+                        if (!sent)
+                            _logger.LogWarning("Completion email was not sent. ApprovalID: {ApprovalID}", id);
+                    }
+                    catch (Exception mailEx)
+                    {
+                        _logger.LogError(mailEx, "Completion email failed. ApprovalID: {ApprovalID}", id);
+                    }
+                }
 
                 return true;
             }

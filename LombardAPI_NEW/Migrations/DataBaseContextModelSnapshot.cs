@@ -70,6 +70,12 @@ namespace LombardAPI_NEW.Migrations
                     b.Property<bool>("IsLocked")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("RequestorId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("RequestorName")
+                        .HasColumnType("text");
+
                     b.Property<string>("Rights")
                         .IsRequired()
                         .HasColumnType("text");

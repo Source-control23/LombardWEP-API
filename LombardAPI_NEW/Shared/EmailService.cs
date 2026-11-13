@@ -4,6 +4,12 @@ using System.Net.Mail;
 public interface IEmailService
 {
     Task<bool> SendEmailAsync(string toEmail, string subject, string bodyHtml);
+
+    /// <summary>
+    /// Sends to dynamically resolved recipients with optional CC.
+    /// Unlike the single-recipient overload, this NEVER falls back to the static config address.
+    /// </summary>
+    Task<bool> SendEmailAsync(IEnumerable<string> toEmails, IEnumerable<string>? ccEmails, string subject, string bodyHtml);
 }
 
 public class EmailService : IEmailService
@@ -65,6 +71,55 @@ public class EmailService : IEmailService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error while sending email to {Recipient}", toEmail);
+            return false;
+        }
+    }
+
+    public async Task<bool> SendEmailAsync(IEnumerable<string> toEmails, IEnumerable<string>? ccEmails, string subject, string bodyHtml)
+    {
+        try
+        {
+            var to = (toEmails ?? Enumerable.Empty<string>())
+                .Where(e => !string.IsNullOrWhiteSpace(e))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (to.Count == 0)
+            {
+                _logger.LogError("No dynamic recipient address supplied. Email not sent.");
+                return false;
+            }
+
+            // CC must not repeat a To address.
+            var cc = (ccEmails ?? Enumerable.Empty<string>())
+                .Where(e => !string.IsNullOrWhiteSpace(e))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Where(e => !to.Contains(e, StringComparer.OrdinalIgnoreCase))
+                .ToList();
+
+            // Prevent header injection through the subject line.
+            string safeSubject = (subject ?? string.Empty).Replace("\r", " ").Replace("\n", " ");
+
+            using var mail = new MailMessage
+            {
+                From = new MailAddress(_fromEmail),
+                Subject = safeSubject,
+                Body = bodyHtml,
+                IsBodyHtml = true
+            };
+
+            // MailAddress validates syntax and throws FormatException on malformed input.
+            foreach (var address in to) mail.To.Add(new MailAddress(address));
+            foreach (var address in cc) mail.CC.Add(new MailAddress(address));
+
+            _logger.LogInformation("Sending email. To count: {ToCount}, CC count: {CcCount}", to.Count, cc.Count);
+
+            await _smtpClient.SendMailAsync(mail);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error while sending email to dynamic recipients.");
             return false;
         }
     }
