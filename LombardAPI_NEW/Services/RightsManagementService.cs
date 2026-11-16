@@ -1,7 +1,9 @@
 ﻿using LombardAPI_NEW.DataBase;
+using LombardAPI_NEW.ErrorHandling;
 using LombardAPI_NEW.Interfaces;
 using LombardAPI_NEW.Models;
 using LombardAPI_NEW.Models.DTOs;
+using LombardAPI_NEW.Shared;
 using Microsoft.Extensions.Options;
 
 namespace LombardAPI_NEW.Services
@@ -13,80 +15,111 @@ namespace LombardAPI_NEW.Services
         private readonly ILogger<RightsManagementService> _logger;
         private readonly PowerShellCommandSettings _cmd;
         private readonly CommonService _commonService;
+        private readonly IGroupMembership _groupService;
+        private readonly IMembershipNotificationService _notificationService;
+        private readonly EmailRecipientResolver _recipientResolver;
+        private readonly CurrentUserService _currentUser;
 
         public RightsManagementService(CommonService commonService,
             DataBaseContext context,
             IEmailService emailService,
-            ILogger<RightsManagementService> logger, IOptions<PowerShellCommandSettings> options)
+            ILogger<RightsManagementService> logger, IOptions<PowerShellCommandSettings> options,
+            IGroupMembership groupService,
+            IMembershipNotificationService notificationService,
+            EmailRecipientResolver recipientResolver,
+            CurrentUserService currentUser)
         {
             _context = context;
             _emailService = emailService;
             _logger = logger;
             _cmd = options.Value;
             _commonService = commonService;
+            _groupService = groupService;
+            _notificationService = notificationService;
+            _recipientResolver = recipientResolver;
+            _currentUser = currentUser;
         }
 
+        /// <summary>
+        /// Saves the Rights (Send Email access) request and emails the DL owner for approval.
+        /// Validation / business errors are raised as ServiceException with a user-facing message.
+        /// </summary>
         public async Task<bool> AddOrRemoveRightsAsync(AddOrRemoveRightsDTO dto)
         {
+            if (dto == null)
+                throw new ServiceException("Invalid request payload.");
+
             // CWE-117 Log Forging: whitelist-validate user input at entry (Checkmarx "How to avoid it" #1).
             // Inline on the taint path so the engine recognises it; strips CR/LF/control chars, neutralising every downstream log.
             dto.DLName = System.Text.RegularExpressions.Regex.Replace(dto.DLName ?? string.Empty, @"[\r\n\t\p{Cc}]", string.Empty);
 
             try
             {
-                string approvalId = await SaveToDB(dto);
+                dto.DLName = RequestValidation.NormaliseDLName(dto.DLName);
+                dto.Action = RequestValidation.NormaliseAction(dto.Action);
+                dto.Source = RequestValidation.NormaliseSource(dto.Source);
+                // Rights = the ID(s) Send Email access is granted to / removed from. They are
+                // placed in PowerShell templates and used as CC addresses, so validate strictly.
+                dto.Rights = RequestValidation.NormaliseEmployeeIds(dto.Rights);
 
-                if (string.IsNullOrEmpty(approvalId))
-                {
-                    _logger.LogWarning("DB save failed for DL {DLName}", System.Text.RegularExpressions.Regex.Replace(dto.DLName ?? string.Empty, @"[\r\n\t\p{Cc}]", string.Empty));
-                    return false;
-                }
+                var (requestorId, requestorName) = _currentUser.ResolveRequestor(dto.RequestorId, dto.RequestorName);
+                dto.RequestorId = requestorId;
+                dto.RequestorName = requestorName;
 
-                string link = $"{_commonService.GetEmailBaseUrl()}approval?id={approvalId}";
+                // The DL owner is the approver: always resolved server-side (same lookup the Rights
+                // screen uses) instead of trusting the client value.
+                dto.DLOwner = await ResolveDLOwnerAsync(dto);
 
-                string body = $@"
-<div style='font-family:Segoe UI,Arial,sans-serif; font-size:14px; color:#333; line-height:1.6;'>
-    <p>Dear Team,</p>
+                var ownerEmails = _recipientResolver.ResolveOwnerEmails(dto.DLOwner);
+                if (ownerEmails.Count == 0)
+                    throw new ServiceException("Unable to determine the DL owner's email address. Approval email cannot be sent.");
 
-    <p>A new <strong>DL Rights Approval</strong> requires your review.</p>
+                DL? saved = await SaveToDB(dto, string.Join(",", ownerEmails));
+                if (saved == null)
+                    throw new ServiceException("Failed to save request in DB.");
 
-    <p style='margin:20px 0;'>
-        <a href='{link}'
-           style='background-color:#0052cc; color:#fff; padding:10px 18px;
-                  text-decoration:none; border-radius:6px; font-weight:600;'>
-            Open Approval Page
-        </a>
-    </p>
-
-    <p>If the button does not work, copy &amp; paste this link:</p>
-
-    <p style='word-break:break-all; color:#0052cc;'>{link}</p>
-
-    <hr style='border:none; border-top:1px solid #e0e0e0; margin:25px 0;' />
-
-    <p style='font-size:12px; color:#777;'>This is an automated email. Please do not reply.</p>
-</div>";
-
-                // Send to DL owner. dto.DLOwner is already saved to DB (DLOWner column).
-                // EmailService falls back to config ToEmail if DLOwner is blank.
-                bool emailSent = await _emailService.SendEmailAsync(dto.DLOwner ?? "", "DL Rights Approval", body);
-
+                bool emailSent = await _notificationService.SendApprovalRequestAsync(saved);
                 if (!emailSent)
                 {
-                    _logger.LogError("Email sending failed for ApprovalID {ApprovalId}", approvalId);
-                    return false;
+                    _logger.LogError("Email sending failed for ApprovalID {ApprovalId}", saved.ApprovalID);
+                    throw new ServiceException("Failed to send approval email.");
                 }
 
                 return true;
             }
+            catch (ServiceException)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Unhandled error occurred in AddOrRemoveRightsAsync for DL {DLName}", System.Text.RegularExpressions.Regex.Replace(dto.DLName ?? string.Empty, @"[\r\n\t\p{Cc}]", string.Empty));
-                return false;
+                throw new ServiceException("Rights request failed.", ex);
             }
         }
 
-        public async Task<string> SaveToDB(AddOrRemoveRightsDTO dto)
+        private async Task<string> ResolveDLOwnerAsync(AddOrRemoveRightsDTO dto)
+        {
+            AddOrRemoveDLMembershipDTO ownerInfo = await _groupService.GetByDLNameAsync(dto.DLName!);
+
+            string? resolvedOwner = ownerInfo?.DLOwner?.Trim();
+
+            if (string.IsNullOrWhiteSpace(resolvedOwner) ||
+                string.Equals(resolvedOwner, "No Owner Assigned", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ServiceException("No owner is assigned to this DL. Approval email cannot be sent.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(dto.DLOwner) &&
+                !string.Equals(dto.DLOwner.Trim(), resolvedOwner, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("Submitted DL owner differs from directory owner. Directory value will be used.");
+            }
+
+            return resolvedOwner;
+        }
+
+        private async Task<DL?> SaveToDB(AddOrRemoveRightsDTO dto, string approverEmails)
         {
             // CWE-117 Log Forging: whitelist-validate user input at entry (Checkmarx "How to avoid it" #1).
             // Inline on the taint path so the engine recognises it; strips CR/LF/control chars, neutralising every downstream log.
@@ -99,14 +132,16 @@ namespace LombardAPI_NEW.Services
                     ApprovalID = Guid.NewGuid().ToString(),
                     Event = dto.Source == "OnPrem" ? "Rights | OnPrem" : "Rights | Cloud",
                     DLName = dto.DLName,
-                    DLOWner = dto.DLOwner,
-                    Action = dto.Action,
+                    DLOWner = dto.DLOwner!,
+                    Action = dto.Action!,
                     EmpIds = "",
-                    Rights = dto.Rights,
+                    Rights = dto.Rights!,
                     IsLocked = false,
                     CreatedTime = DateTime.UtcNow,
                     ApprovalStatus = "Pending",
-                    ApproverEmail = null
+                    ApproverEmail = approverEmails,
+                    RequestorId = dto.RequestorId,
+                    RequestorName = dto.RequestorName
                 };
 
                 await _context.DLDetails.AddAsync(dlEntry);
@@ -114,12 +149,12 @@ namespace LombardAPI_NEW.Services
 
                 _logger.LogInformation("Saved DL Rights request. ApprovalID: {Id}", dlEntry.ApprovalID);
 
-                return dlEntry.ApprovalID;
+                return dlEntry;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "DB insert failed for DL {DLName}", System.Text.RegularExpressions.Regex.Replace(dto.DLName ?? string.Empty, @"[\r\n\t\p{Cc}]", string.Empty));
-                return "";
+                return null;
             }
         }
     }

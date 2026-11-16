@@ -87,7 +87,12 @@ public class GroupMembershipController : ControllerBase
             }
 
             _logger.LogInformation("DL membership operation successful.");
-            return Ok(ApiResponse.Ok("Operation successful"));
+            return Ok(new ApiResponse
+            {
+                Success = true,
+                Message = ApprovalMessages.SentToOwner,
+                Data = ApprovalMessages.SentToOwner
+            });
         }
         catch (ServiceException ex)
         {

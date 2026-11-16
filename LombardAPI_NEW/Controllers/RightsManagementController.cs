@@ -1,4 +1,6 @@
-﻿using LombardAPI_NEW.Interfaces;
+﻿using LombardAPI_NEW.ErrorHandling;
+using LombardAPI_NEW.Interfaces;
+using LombardAPI_NEW.Models;
 using LombardAPI_NEW.Models.DTOs;
 using Microsoft.AspNetCore.Mvc;
 
@@ -51,9 +53,14 @@ namespace LombardAPI_NEW.Controllers
                 bool success = await _rightsService.AddOrRemoveRightsAsync(dto);
 
                 if (success)
-                    return Ok(new { Message = "Request has been submitted." });
+                    return Ok(new { Message = ApprovalMessages.SentToOwner });
 
                 return BadRequest(new { Message = "Operation failed." });
+            }
+            catch (ServiceException ex)
+            {
+                _logger.LogWarning(ex, "Validation/business error during rights request.");
+                return BadRequest(new { Message = ex.Message });
             }
             catch (Exception ex)
             {

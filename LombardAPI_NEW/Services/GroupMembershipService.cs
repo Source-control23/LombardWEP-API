@@ -21,7 +21,7 @@ namespace LombardAPI_NEW.Services
         private readonly CommonService _commonService;
         private readonly IMembershipNotificationService _notificationService;
         private readonly EmailRecipientResolver _recipientResolver;
-        private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly CurrentUserService _currentUser;
 
         public GroupMembershipService(CommonService commonService,
             DataBaseContext context,
@@ -29,7 +29,7 @@ namespace LombardAPI_NEW.Services
             ILogger<GroupMembershipService> logger, IOptions<PowerShellCommandSettings> options,
             IMembershipNotificationService notificationService,
             EmailRecipientResolver recipientResolver,
-            IHttpContextAccessor httpContextAccessor)
+            CurrentUserService currentUser)
         {
             _context = context;
             _emailService = emailService;
@@ -38,7 +38,7 @@ namespace LombardAPI_NEW.Services
             _commonService = commonService;
             _notificationService = notificationService;
             _recipientResolver = recipientResolver;
-            _httpContextAccessor = httpContextAccessor;
+            _currentUser = currentUser;
         }
 
         public string RunExchangeCloudCommand(string command)
@@ -546,11 +546,13 @@ namespace LombardAPI_NEW.Services
                 _logger.LogInformation("Resolving DL owner from directory...");
                 dto.DLOwner = await ResolveDLOwnerAsync(dto);
 
-                if (_recipientResolver.ResolveOwnerEmails(dto.DLOwner).Count == 0)
+                var ownerEmails = _recipientResolver.ResolveOwnerEmails(dto.DLOwner);
+                if (ownerEmails.Count == 0)
                     throw new ServiceException("Unable to determine the DL owner's email address. Approval email cannot be sent.");
 
                 _logger.LogInformation("Saving DL request into DB...");
-                DL? saved = await SaveToDB(dto);
+                // ApproverEmail = the only people allowed to approve/reject this request.
+                DL? saved = await SaveToDB(dto, string.Join(",", ownerEmails));
 
                 if (saved == null)
                     throw new ServiceException("Failed to save request in DB.");
@@ -575,83 +577,23 @@ namespace LombardAPI_NEW.Services
             }
         }
 
-        // Characters that would break out of / expand inside the double-quoted PowerShell templates
-        // (straight and typographic double quotes, backtick, dollar) plus control characters.
-        private static readonly char[] UnsafeDLNameChars = { '"', '“', '”', '„', '`', '$' };
-
         private static void ValidateMembershipRequest(AddOrRemoveDLMembershipDTO dto)
         {
-            dto.DLName = dto.DLName?.Trim();
-            if (string.IsNullOrWhiteSpace(dto.DLName) || dto.DLName.Length > 256)
-                throw new ServiceException("DL name is required.");
-
-            if (dto.DLName.IndexOfAny(UnsafeDLNameChars) >= 0 || dto.DLName.Any(char.IsControl))
-                throw new ServiceException("DL name contains invalid characters.");
-
-            // Canonicalise Action/Source: downstream code compares them case-sensitively
-            // ("Add" adds, anything else removes; "OnPrem"/"Cloud" selects the event).
-            if (string.Equals(dto.Action?.Trim(), "Add", StringComparison.OrdinalIgnoreCase))
-                dto.Action = "Add";
-            else if (string.Equals(dto.Action?.Trim(), "Remove", StringComparison.OrdinalIgnoreCase))
-                dto.Action = "Remove";
-            else
-                throw new ServiceException("Action must be either 'Add' or 'Remove'.");
-
-            if (string.Equals(dto.Source?.Trim(), "OnPrem", StringComparison.OrdinalIgnoreCase))
-                dto.Source = "OnPrem";
-            else if (string.Equals(dto.Source?.Trim(), "Cloud", StringComparison.OrdinalIgnoreCase))
-                dto.Source = "Cloud";
-            else
-                throw new ServiceException("Invalid source value. Allowed: OnPrem, Cloud.");
-
-            var empIds = EmailRecipientResolver.SplitEmployeeIds(dto.EmpIds);
-            if (empIds.Count == 0)
-                throw new ServiceException("At least one Employee/Consultant ID is required.");
-
-            if (!empIds.All(EmailRecipientResolver.IsValidEmployeeId))
-                throw new ServiceException("One or more Employee/Consultant IDs are invalid. Only letters, digits, '.', '_' and '-' are allowed.");
-
-            dto.EmpIds = string.Join(",", empIds);
+            dto.DLName = RequestValidation.NormaliseDLName(dto.DLName);
+            dto.Action = RequestValidation.NormaliseAction(dto.Action);
+            dto.Source = RequestValidation.NormaliseSource(dto.Source);
+            dto.EmpIds = RequestValidation.NormaliseEmployeeIds(dto.EmpIds);
         }
 
         /// <summary>
-        /// Requestor = currently logged-in user. When the API runs with an authenticated identity
-        /// (e.g. Windows Authentication on IIS) that identity wins; otherwise the value sent by the
-        /// frontend is used after strict validation.
+        /// Requestor = currently logged-in user (validated Entra ID token when present,
+        /// otherwise the value sent by the frontend after strict validation).
         /// </summary>
         private void ResolveRequestor(AddOrRemoveDLMembershipDTO dto)
         {
-            var identity = _httpContextAccessor.HttpContext?.User?.Identity;
-
-            if (identity?.IsAuthenticated == true && !string.IsNullOrWhiteSpace(identity.Name))
-            {
-                string authId = identity.Name;
-
-                int slash = authId.LastIndexOf('\\');           // DOMAIN\user
-                if (slash >= 0) authId = authId[(slash + 1)..];
-
-                int at = authId.IndexOf('@');                     // user@domain
-                if (at > 0) authId = authId[..at];
-
-                if (!string.IsNullOrWhiteSpace(dto.RequestorId) &&
-                    !string.Equals(dto.RequestorId.Trim(), authId, StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.LogWarning("Submitted requestor differs from authenticated user. Authenticated identity will be used.");
-                }
-
-                dto.RequestorId = authId;
-            }
-
-            dto.RequestorId = dto.RequestorId?.Trim();
-            if (!EmailRecipientResolver.IsValidEmployeeId(dto.RequestorId))
-                throw new ServiceException("Requestor ID is missing or invalid.");
-
-            dto.RequestorName = dto.RequestorName?.Trim();
-            if (string.IsNullOrWhiteSpace(dto.RequestorName))
-                dto.RequestorName = dto.RequestorId;
-
-            if (dto.RequestorName!.Length > 256 || dto.RequestorName.Any(char.IsControl))
-                throw new ServiceException("Requestor name is invalid.");
+            var (id, name) = _currentUser.ResolveRequestor(dto.RequestorId, dto.RequestorName);
+            dto.RequestorId = id;
+            dto.RequestorName = name;
         }
 
         private async Task<string> ResolveDLOwnerAsync(AddOrRemoveDLMembershipDTO dto)
@@ -677,7 +619,7 @@ namespace LombardAPI_NEW.Services
             return resolvedOwner;
         }
 
-        private async Task<DL?> SaveToDB(AddOrRemoveDLMembershipDTO dto)
+        private async Task<DL?> SaveToDB(AddOrRemoveDLMembershipDTO dto, string approverEmails)
         {
             try
             {
@@ -696,7 +638,7 @@ namespace LombardAPI_NEW.Services
                         IsLocked = false,
                         CreatedTime = DateTime.UtcNow,
                         ApprovalStatus = "Pending",
-                        ApproverEmail = "",
+                        ApproverEmail = approverEmails,
                         RequestorId = dto.RequestorId,
                         RequestorName = dto.RequestorName
                     };
@@ -715,7 +657,7 @@ namespace LombardAPI_NEW.Services
                         IsLocked = false,
                         CreatedTime = DateTime.UtcNow,
                         ApprovalStatus = "Pending",
-                        ApproverEmail = "",
+                        ApproverEmail = approverEmails,
                         RequestorId = dto.RequestorId,
                         RequestorName = dto.RequestorName
                     };

@@ -1,4 +1,5 @@
 ﻿using LombardAPI_NEW.DataBase;
+using LombardAPI_NEW.ErrorHandling;
 using LombardAPI_NEW.Interfaces;
 using LombardAPI_NEW.Models;
 using LombardAPI_NEW.Shared;
@@ -8,6 +9,11 @@ namespace LombardAPI_NEW.Services
 {
     public class ApprovalService : IApproval
     {
+        private const string StatusPending = "Pending";
+        private const string StatusProcessing = "Processing";
+        private const string StatusApproved = "Approved";
+        private const string StatusRejected = "Rejected";
+
         private readonly DataBaseContext _context;
         private readonly PowershellCommandService _powershellcommand;
         private readonly ILogger<ApprovalService> _logger;
@@ -22,173 +28,217 @@ namespace LombardAPI_NEW.Services
             _notificationService = notificationService;
         }
 
-        public async Task<DL> GetRequestasync(string id)
+        /// <summary>Pending request by ApprovalID (kept for existing callers).</summary>
+        public async Task<DL?> GetRequestasync(string id)
         {
             try
             {
-                // Assuming 'Id' is a string or convertable
-                var request = await _context.DLDetails
-                                            .Where(d => d.ApprovalID == id && d.ApprovalStatus == "Pending")
-                                            .FirstOrDefaultAsync();
-
-                return request;
+                return await _context.DLDetails
+                    .Where(d => d.ApprovalID == id && d.ApprovalStatus == StatusPending)
+                    .FirstOrDefaultAsync();
             }
             catch (Exception ex)
             {
-                // Log exception
-                Console.WriteLine(ex.Message);
+                _logger.LogError(ex, "Failed to load pending request.");
                 return null;
             }
         }
 
-        //public async Task<bool> Approveasync(string id)
-        //{
-        //    try
-        //    {
-        //        DL req = await GetRequestasync(id);
-        //        if (req == null)
-        //        {
-        //            return false;
-        //        }
-
-        //        if (req.Event == "Membership | OnPrem" || req.Event == "Membership | Cloud")
-        //        {
-        //            _powershellcommand.GroupMembershipCommand(req);
-
-        //        }
-        //        else if (req.Event == "Rights | Onprem" || req.Event == "Rights | Cloud")
-        //        {
-        //            _powershellcommand.RightsManagementCommand(req);
-        //        }
-        //        else if (req.Event == "Unlock")
-        //        {
-        //            _powershellcommand.AccountUnlockCommand(req);
-        //        }
-
-        //        var requestToUpdate = await _context.DLDetails
-        //                                   .Where(d => d.ApprovalID == id)
-        //                                   .FirstOrDefaultAsync();
-        //        requestToUpdate.ApprovalStatus = "Approved";
-        //        await _context.SaveChangesAsync();
-
-        //        return true;
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        Console.WriteLine(ex.Message);
-        //        return false;
-        //    }
-        //}
-
-        public async Task<bool> Approveasync(string id)
+        // ─────────────────────────────────────────────────────────────────────
+        // VIEW (approval page)
+        // ─────────────────────────────────────────────────────────────────────
+        public async Task<ApprovalOutcome> GetRequestForApproverAsync(string id, CallerIdentity? caller)
         {
-            _logger.LogInformation("ApproveAsync started. ApprovalID: {ApprovalID}", id);
+            var (request, denied) = await LoadAuthorisedAsync(id, caller);
+            if (denied != null)
+                return denied;
 
-            try
-            {
-                _logger.LogInformation("Fetching request details from GetRequestAsync.");
-
-                DL req = await GetRequestasync(id);
-
-                if (req == null)
-                {
-                    _logger.LogWarning("Request not found. ApprovalID: {ApprovalID}", id);
-                    return false;
-                }
-
-                _logger.LogInformation("Request fetched successfully. Event: {Event}", req.Event);
-
-                IReadOnlyList<MembershipExecutionResult>? membershipResults = null;
-
-                if (req.Event == "Membership | OnPrem" || req.Event == "Membership | Cloud")
-                {
-                    _logger.LogInformation("Executing GroupMembershipCommand.");
-                    membershipResults = _powershellcommand.GroupMembershipCommand(req);
-                    _logger.LogInformation("GroupMembershipCommand executed successfully.");
-                }
-                else if (req.Event == "Rights | OnPrem" || req.Event == "Rights | Cloud")
-                {
-                    _logger.LogInformation("Executing RightsManagementCommand.");
-                    _powershellcommand.RightsManagementCommand(req);
-                    _logger.LogInformation("RightsManagementCommand executed successfully.");
-                }
-                else if (req.Event == "Unlock")
-                {
-                    _logger.LogInformation("Executing AccountUnlockCommand.");
-                    _powershellcommand.AccountUnlockCommand(req);
-                    _logger.LogInformation("AccountUnlockCommand executed successfully.");
-                }
-                else
-                {
-                    _logger.LogWarning("Unknown event type received: {Event}", req.Event);
-                }
-
-                _logger.LogInformation("Fetching DLDetails record to update approval status.");
-
-                var requestToUpdate = await _context.DLDetails
-                    .Where(d => d.ApprovalID == id)
-                    .FirstOrDefaultAsync();
-
-                if (requestToUpdate == null)
-                {
-                    _logger.LogWarning("DLDetails record not found for ApprovalID: {ApprovalID}", id);
-                    return false;
-                }
-
-                _logger.LogInformation("Updating ApprovalStatus to Approved.");
-
-                requestToUpdate.ApprovalStatus = "Approved";
-                await _context.SaveChangesAsync();
-
-                _logger.LogInformation("Approval completed successfully. ApprovalID: {ApprovalID}", id);
-
-                // Completion email to the requestor (requested IDs in CC). The change is already
-                // executed and persisted, so a mail failure is logged but does not fail the approval.
-                if (membershipResults != null)
-                {
-                    try
-                    {
-                        bool sent = await _notificationService.SendCompletionAsync(requestToUpdate, membershipResults);
-                        if (!sent)
-                            _logger.LogWarning("Completion email was not sent. ApprovalID: {ApprovalID}", id);
-                    }
-                    catch (Exception mailEx)
-                    {
-                        _logger.LogError(mailEx, "Completion email failed. ApprovalID: {ApprovalID}", id);
-                    }
-                }
-
-                return true;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex,
-                    "Error occurred in ApproveAsync. ApprovalID: {ApprovalID}", id);
-
-                return false;
-            }
+            // Any status is returned so the page can say "already approved/rejected".
+            return ApprovalOutcome.Ok("Success", request);
         }
 
-
-        public async Task<bool> Rejectasync(string id)
+        // ─────────────────────────────────────────────────────────────────────
+        // APPROVE
+        // ─────────────────────────────────────────────────────────────────────
+        public async Task<ApprovalOutcome> ApproveAsync(string id, CallerIdentity? caller)
         {
+            var (request, denied) = await LoadAuthorisedAsync(id, caller);
+            if (denied != null)
+                return denied;
+
+            if (request!.ApprovalStatus != StatusPending)
+                return StatusConflict(request.ApprovalStatus);
+
+            // Atomically claim the request so a double click / two owners cannot execute it twice.
+            int claimed = await _context.DLDetails
+                .Where(d => d.ApprovalID == request.ApprovalID && d.ApprovalStatus == StatusPending)
+                .ExecuteUpdateAsync(s => s.SetProperty(d => d.ApprovalStatus, StatusProcessing));
+
+            if (claimed == 0)
+                return StatusConflict(await CurrentStatusAsync(request.ApprovalID));
+
+            _logger.LogInformation("Approval started. ApprovalID: {ApprovalID}, Event: {Event}", request.ApprovalID, request.Event);
+
+            IReadOnlyList<MembershipExecutionResult>? results;
             try
             {
-                var req = await GetRequestasync(id);
-                if (req == null) return false;
-
-                var requestToUpdate = await _context.DLDetails
-                                           .Where(d => d.ApprovalID == id)
-                                           .FirstOrDefaultAsync();
-                requestToUpdate.ApprovalStatus = "Rejected";
-                await _context.SaveChangesAsync();
-
-                return true;
+                results = ExecuteRequest(request);
             }
             catch (Exception ex)
             {
-                Console.WriteLine(ex.Message);
-                return false;
+                _logger.LogError(ex, "Execution failed. ApprovalID: {ApprovalID}", request.ApprovalID);
+
+                // Release the claim so the owner can retry (same as the previous behaviour, where the
+                // request stayed Pending when execution failed).
+                await _context.DLDetails
+                    .Where(d => d.ApprovalID == request.ApprovalID && d.ApprovalStatus == StatusProcessing)
+                    .ExecuteUpdateAsync(s => s.SetProperty(d => d.ApprovalStatus, StatusPending));
+
+                string message = ex is ServiceException
+                    ? $"Approval failed: {ex.Message} The request is still pending."
+                    : ApprovalMessages.ApprovalFailed;
+
+                return ApprovalOutcome.Failed(message);
+            }
+
+            DateTime approvedAt = DateTime.UtcNow;
+            await _context.DLDetails
+                .Where(d => d.ApprovalID == request.ApprovalID)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(d => d.ApprovalStatus, StatusApproved)
+                    .SetProperty(d => d.ApprovalTime, approvedAt));
+
+            request.ApprovalStatus = StatusApproved;
+            request.ApprovalTime = approvedAt;
+
+            _logger.LogInformation("Approval completed successfully. ApprovalID: {ApprovalID}", request.ApprovalID);
+
+            // Completion email. The change is already executed and persisted, so a mail failure is
+            // logged but does not fail the approval.
+            if (results != null)
+            {
+                await TryNotifyAsync(() => _notificationService.SendCompletionAsync(request, results, caller!.DisplayName),
+                    "Completion", request.ApprovalID);
+            }
+
+            return ApprovalOutcome.Ok(ApprovalMessages.Approved, request);
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // REJECT
+        // ─────────────────────────────────────────────────────────────────────
+        public async Task<ApprovalOutcome> RejectAsync(string id, CallerIdentity? caller)
+        {
+            var (request, denied) = await LoadAuthorisedAsync(id, caller);
+            if (denied != null)
+                return denied;
+
+            if (request!.ApprovalStatus != StatusPending)
+                return StatusConflict(request.ApprovalStatus);
+
+            DateTime rejectedAt = DateTime.UtcNow;
+            int updated = await _context.DLDetails
+                .Where(d => d.ApprovalID == request.ApprovalID && d.ApprovalStatus == StatusPending)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(d => d.ApprovalStatus, StatusRejected)
+                    .SetProperty(d => d.ApprovalTime, rejectedAt));
+
+            if (updated == 0)
+                return StatusConflict(await CurrentStatusAsync(request.ApprovalID));
+
+            request.ApprovalStatus = StatusRejected;
+            request.ApprovalTime = rejectedAt;
+
+            _logger.LogInformation("Request rejected. ApprovalID: {ApprovalID}", request.ApprovalID);
+
+            if (IsMembershipOrRights(request))
+            {
+                await TryNotifyAsync(() => _notificationService.SendRejectionAsync(request, caller!.DisplayName),
+                    "Rejection", request.ApprovalID);
+            }
+
+            return ApprovalOutcome.Ok(ApprovalMessages.Rejected, request);
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // HELPERS
+        // ─────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Loads the request and checks that the signed-in caller is one of its approvers
+        /// (the DL owner the approval email was sent to). Forwarded links fail here.
+        /// </summary>
+        private async Task<(DL? Request, ApprovalOutcome? Denied)> LoadAuthorisedAsync(string id, CallerIdentity? caller)
+        {
+            if (caller == null)
+                return (null, ApprovalOutcome.Unauthenticated());
+
+            // Approval IDs are GUIDs; anything else is rejected before touching the DB.
+            if (!Guid.TryParse(id, out var guid))
+                return (null, ApprovalOutcome.NotFound());
+
+            string approvalId = guid.ToString();
+
+            DL? request = await _context.DLDetails
+                .AsNoTracking()
+                .FirstOrDefaultAsync(d => d.ApprovalID == approvalId);
+
+            if (request == null || !IsMembershipOrRights(request))
+                return (null, ApprovalOutcome.NotFound());
+
+            var approvers = _notificationService.GetApproverEmails(request);
+            if (approvers.Count == 0 || !caller.MatchesAny(approvers))
+            {
+                _logger.LogWarning("Approval access denied. ApprovalID: {ApprovalID}, Caller: {Caller}",
+                    approvalId, RequestValidation.ForLog(caller.PrimaryId));
+                return (null, ApprovalOutcome.Forbidden());
+            }
+
+            return (request, null);
+        }
+
+        private IReadOnlyList<MembershipExecutionResult>? ExecuteRequest(DL req)
+        {
+            if (req.Event == "Membership | OnPrem" || req.Event == "Membership | Cloud")
+            {
+                return _powershellcommand.GroupMembershipCommand(req);
+            }
+
+            if (req.Event == "Rights | OnPrem" || req.Event == "Rights | Cloud")
+            {
+                _powershellcommand.RightsManagementCommand(req);   // throws on failure
+                return MembershipNotificationService.GetRequestedIds(req)
+                    .Select(rid => new MembershipExecutionResult(rid, MembershipExecutionResult.Success))
+                    .ToList();
+            }
+
+            throw new ServiceException($"Unsupported request type '{req.Event}'.");
+        }
+
+        private static bool IsMembershipOrRights(DL req) =>
+            req.Event is "Membership | OnPrem" or "Membership | Cloud" or "Rights | OnPrem" or "Rights | Cloud";
+
+        private async Task<string> CurrentStatusAsync(string approvalId) =>
+            await _context.DLDetails.AsNoTracking()
+                .Where(d => d.ApprovalID == approvalId)
+                .Select(d => d.ApprovalStatus)
+                .FirstOrDefaultAsync() ?? StatusPending;
+
+        private static ApprovalOutcome StatusConflict(string status) =>
+            status == StatusProcessing
+                ? ApprovalOutcome.Conflict(ApprovalMessages.Processing)
+                : ApprovalOutcome.Conflict(ApprovalMessages.AlreadyProcessed(status));
+
+        private async Task TryNotifyAsync(Func<Task<bool>> send, string kind, string approvalId)
+        {
+            try
+            {
+                if (!await send())
+                    _logger.LogWarning("{Kind} email was not sent. ApprovalID: {ApprovalID}", kind, approvalId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "{Kind} email failed. ApprovalID: {ApprovalID}", kind, approvalId);
             }
         }
     }
