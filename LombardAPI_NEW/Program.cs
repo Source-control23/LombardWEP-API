@@ -2,6 +2,7 @@
 using FluentValidation.AspNetCore;
 using LombardAPI_NEW.DataBase;
 using LombardAPI_NEW.Extensions;
+using LombardAPI_NEW.Middlewares;
 using LombardAPI_NEW.Models;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -50,8 +51,8 @@ builder.Services.AddControllers();
 builder.Services.AddAuthorization();
 
 // Microsoft Entra ID (Azure AD) access tokens sent by the Angular app (MSAL interceptor).
-// Tokens are validated on every request; only endpoints marked [Authorize] (the approval
-// endpoints) REQUIRE one. Tenant / client IDs are public identifiers, not secrets.
+// Tokens are validated on every request; every controller is [Authorize] (DAST "Unauthenticated API")
+// and privileged screens additionally require the Feature.Access app role. IDs below are public, not secrets.
 var azureAd = builder.Configuration.GetSection("AzureAd");
 string? tenantId = azureAd["TenantId"];
 string? apiClientId = azureAd["ClientId"];
@@ -111,6 +112,15 @@ builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 // Custom services
 builder.Services.AddLombardServices(builder.Configuration);
 
+// HSTS (Strict-Transport-Security) options — tells browsers to only ever
+// contact this API over HTTPS. Resolves the "Missing HSTS Header" finding.
+builder.Services.AddHsts(options =>
+{
+    options.Preload = true;
+    options.IncludeSubDomains = true;
+    options.MaxAge = TimeSpan.FromDays(365);
+});
+
 // Swagger
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -131,24 +141,92 @@ builder.Services.AddCors(options =>
     });
 });
 
+//
+// -------------------- RATE LIMITING --------------------
+//
+// Resolves the "Improper Rate Limiting" DAST finding for EVERY endpoint (GAL Search,
+// Account Unlock, Group Membership, Rights Management, Approval). Per client IP:
+//   Layer 1 — burst:     2 requests / 5 seconds (sliding window)
+//   Layer 2 — sustained: 20 requests / 15 minutes (fixed window; once used up the IP
+//                        gets 429 until the window resets)
+// Same values as the DAST-cleared build; optionally tunable via the "RateLimiting"
+// section (BurstPermitLimit, BurstWindowSeconds, PermitLimit, WindowMinutes).
+//
+var rateCfg = builder.Configuration.GetSection("RateLimiting");
+int burstPermitLimit = rateCfg.GetValue("BurstPermitLimit", 2);
+int burstWindowSeconds = rateCfg.GetValue("BurstWindowSeconds", 5);
+int sustainedPermitLimit = rateCfg.GetValue("PermitLimit", 20);
+int sustainedWindowMinutes = rateCfg.GetValue("WindowMinutes", 15);
+
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    options.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter
+        .CreateChained(
+            System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(
+                httpContext =>
+                {
+                    var key = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                    return System.Threading.RateLimiting.RateLimitPartition.GetSlidingWindowLimiter(
+                        partitionKey: "burst_" + key,
+                        factory: _ => new System.Threading.RateLimiting.SlidingWindowRateLimiterOptions
+                        {
+                            PermitLimit = burstPermitLimit,
+                            Window = TimeSpan.FromSeconds(burstWindowSeconds),
+                            SegmentsPerWindow = 5,
+                            QueueLimit = 0
+                        });
+                }),
+            System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(
+                httpContext =>
+                {
+                    var key = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                    return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: "sustained_" + key,
+                        factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = sustainedPermitLimit,
+                            Window = TimeSpan.FromMinutes(sustainedWindowMinutes),
+                            QueueLimit = 0
+                        });
+                })
+        );
+});
+
 var app = builder.Build();
 
 if (!azureAdConfigured)
 {
-    app.Logger.LogCritical("AzureAd:TenantId / AzureAd:ClientId missing or invalid in configuration. Approval endpoints will reject all requests (401).");
+    app.Logger.LogCritical("AzureAd:TenantId / AzureAd:ClientId missing or invalid in configuration. All [Authorize] endpoints will reject all requests (401).");
 }
 
 //
 // -------------------- MIDDLEWARE --------------------
 //
 
-// Swagger
-app.UseSwagger();
-app.UseSwaggerUI();
+// Apply strict security headers to everything EXCEPT the Swagger UI,
+// which needs to load its own scripts/styles.
+app.UseWhen(
+    ctx => !ctx.Request.Path.StartsWithSegments("/swagger"),
+    branch => branch.UseSecurityHeaders());
 
-// app.UseHttpsRedirection(); // enable only if HTTPS binding exists
+// HSTS on the guaranteed execution path (browsers ignore it over plain http/localhost).
+app.UseHsts();
+
+// Redirect any HTTP request to HTTPS so the HSTS header is actually honoured.
+app.UseHttpsRedirection();
+
+// Swagger only in Development (no API inventory exposed in UAT / Production).
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
 
 app.UseRouting();
+
+app.UseRateLimiter();
 
 // 🔥 ORDER IS CRITICAL
 app.UseCors("UATPolicy");

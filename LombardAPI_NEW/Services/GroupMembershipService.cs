@@ -43,7 +43,7 @@ namespace LombardAPI_NEW.Services
 
         public string RunExchangeCloudCommand(string command)
         {
-            using var scope = _logger.BeginScope("ExchangeCloud | Command: {Cmd}", command);
+            using var scope = _logger.BeginScope("ExchangeCloud | Command: {Cmd}", LogSanitizer.Clean(command));
 
             try
             {
@@ -82,42 +82,67 @@ namespace LombardAPI_NEW.Services
 
         public Task<AddOrRemoveDLMembershipDTO> GetByDLNameCloudAsync(string dlName)
         {
-            using var scope = _logger.BeginScope("Cloud DL Lookup | {DL}", dlName);
+            // CWE-117 Log Forging: strip CR/LF/control chars from user input at entry.
+            dlName = System.Text.RegularExpressions.Regex.Replace(dlName ?? string.Empty, @"[\r\n\t\p{Cc}]", string.Empty);
+            using var scope = _logger.BeginScope("Cloud DL Lookup | {DL}", LogSanitizer.Clean(dlName));
 
             try
             {
                 if (string.IsNullOrWhiteSpace(dlName))
                     throw new ServiceException("DL name cannot be empty.");
 
+                // PowerShell injection guard (defence in depth): the name is placed inside a
+                // double-quoted template, so quotes, backtick and '$' are rejected.
+                dlName = RequestValidation.NormaliseDLName(dlName);
+
                 _logger.LogInformation("STEP 1 → Preparing PowerShell command");
 
                 string command = _cmd.Membership.Cloud.GetDLWithOwner
                     .Replace("{dlName}", dlName);
 
-                _logger.LogDebug("Exchange Command: {Command}", command);
+                _logger.LogDebug("Exchange Command: {Command}", LogSanitizer.Clean(command));
 
                 _logger.LogInformation("STEP 2 → Executing Exchange lookup");
 
                 var result = RunExchangeCloudCommand(command);
 
-                _logger.LogInformation("STEP 3 → Parsing Exchange result" + result.ToString());
+                _logger.LogInformation("STEP 3 → Parsing Exchange result: {Result}", LogSanitizer.Clean(result?.ToString()));
 
                 var json = JsonSerializer.Deserialize<JsonElement>(result);
-                _logger.LogInformation("STEP 4 → Parsing result as json" + json.ToString());
+                _logger.LogInformation("STEP 4 → Parsing result as json: {Json}", LogSanitizer.Clean(json.ToString()));
                 string ownerName = json.GetProperty("OwnerName").ValueKind switch
                 {
                     JsonValueKind.Array => string.Join(", ",
                         json.GetProperty("OwnerName").EnumerateArray().Select(x => x.GetString())),
                     _ => json.GetProperty("OwnerName").GetString()
                 };
-                _logger.LogInformation("OWner" + ownerName.ToString());
+                _logger.LogInformation("Owner: {Owner}", LogSanitizer.Clean(ownerName?.ToString()));
                 string ownerEmail = json.GetProperty("OwnerEmail").ValueKind switch
                 {
                     JsonValueKind.Array => string.Join(", ",
                         json.GetProperty("OwnerEmail").EnumerateArray().Select(x => x.GetString())),
                     _ => json.GetProperty("OwnerEmail").GetString()
                 };
-                _logger.LogInformation("DL Owner resolved: {Owner}", ownerName);
+
+                // Prefer the owner's sign-in name (UPN, e.g. ILOM35124@icicilombard.com) when the
+                // lookup returns it: the primary SMTP address can differ (e.g. akash.gowda@ext...),
+                // and the approval page matches the approver against the signed-in UPN.
+                // Falls back to OwnerEmail when the configured command does not return OwnerUpn.
+                if (json.TryGetProperty("OwnerUpn", out var upnProp))
+                {
+                    string? ownerUpn = upnProp.ValueKind switch
+                    {
+                        JsonValueKind.Array => string.Join(", ",
+                            upnProp.EnumerateArray().Select(x => x.GetString()).Where(s => !string.IsNullOrWhiteSpace(s))),
+                        JsonValueKind.String => upnProp.GetString(),
+                        _ => null
+                    };
+
+                    if (!string.IsNullOrWhiteSpace(ownerUpn))
+                        ownerEmail = ownerUpn;
+                }
+
+                _logger.LogInformation("DL Owner resolved: {Owner}", LogSanitizer.Clean(ownerName));
 
                 return Task.FromResult(new AddOrRemoveDLMembershipDTO
                 {
@@ -183,7 +208,9 @@ namespace LombardAPI_NEW.Services
             //    GroupOwnershipChange = "Deny"
             //};
             //return dto;
-            using var scope = _logger.BeginScope("GetByDLNameAsync | DLName: {DLName}", dlName);
+            // CWE-117 Log Forging: strip CR/LF/control chars from user input at entry.
+            dlName = System.Text.RegularExpressions.Regex.Replace(dlName ?? string.Empty, @"[\r\n\t\p{Cc}]", string.Empty);
+            using var scope = _logger.BeginScope("GetByDLNameAsync | DLName: {DLName}", LogSanitizer.Clean(dlName));
 
             try
             {
@@ -195,15 +222,19 @@ namespace LombardAPI_NEW.Services
                     throw new ArgumentException("DL name cannot be null or empty");
                 }
 
+                // PowerShell injection guard (defence in depth): the name is placed inside a
+                // double-quoted template, so quotes, backtick and '$' are rejected.
+                dlName = RequestValidation.NormaliseDLName(dlName);
+
                 _logger.LogInformation("Executing Get-ADGroup command.");
 
                 string groupCommand = _cmd.Membership.OnPrem.Get.Replace("{dlName}", dlName);
                // string groupCommand = $"Get-ADGroup -Identity \"{dlName}\" -Properties ManagedBy | ConvertTo-Json -Depth 5";
 
-                _logger.LogDebug("Group PS Command: {Command}", groupCommand);
+                _logger.LogDebug("Group PS Command: {Command}", LogSanitizer.Clean(groupCommand));
 
                 var groupResult = Powershell.RunPowerShell(groupCommand);
-                _logger.LogInformation($"GroupResult from cmd : {groupResult}");
+                _logger.LogInformation("GroupResult from cmd : {GroupResult}", LogSanitizer.Clean(groupResult));
                 groupResult = string.Join("", groupResult.Select(r => r.ToString()));
 
                 _logger.LogDebug(
@@ -241,7 +272,7 @@ namespace LombardAPI_NEW.Services
 
                 string managedByDn = managedByProp.GetString();
 
-                _logger.LogInformation("ManagedBy DN: {ManagedByDn}", managedByDn);
+                _logger.LogInformation("ManagedBy DN: {ManagedByDn}", LogSanitizer.Clean(managedByDn));
 
                 if (string.IsNullOrEmpty(managedByDn))
                 {
@@ -260,7 +291,7 @@ namespace LombardAPI_NEW.Services
     //$"Get-ADUser -Identity \"{managedByDn}\" -Properties DisplayName,SamAccountName | " +
     //                "Select-Object DisplayName,SamAccountName | ConvertTo-Json";
 
-                _logger.LogDebug("Owner PS Command: {Command}", ownerCommand);
+                _logger.LogDebug("Owner PS Command: {Command}", LogSanitizer.Clean(ownerCommand));
 
                 var ownerResult = Powershell.RunPowerShell(ownerCommand);
 
@@ -411,7 +442,7 @@ namespace LombardAPI_NEW.Services
         //        //    $"Get-ADUser -Identity \"{managedByDn}\" -Properties DisplayName,SamAccountName | " +
         //        //    "Select-Object DisplayName,SamAccountName | ConvertTo-Json";
 
-        //        _logger.LogDebug("Owner PS Command: {Command}", ownerCommand);
+        //        _logger.LogDebug("Owner PS Command: {Command}", LogSanitizer.Clean(ownerCommand));
 
         //        var ownerResult = Powershell.RunPowerShell(ownerCommand);
 
@@ -526,7 +557,8 @@ namespace LombardAPI_NEW.Services
             {
                 _logger.LogError(ex, "❌ DB TEST FAILED");
 
-                return $"FAILED ❌ | {ex.GetType().Name} | {ex.Message}";
+                // Improper Error Handling: details stay in the server log only.
+                return "FAILED ❌ | Database test failed. See server logs for details.";
             }
         }
 
@@ -535,7 +567,7 @@ namespace LombardAPI_NEW.Services
             if (dto == null)
                 throw new ServiceException("Invalid request payload.");
 
-            using var scope = _logger.BeginScope(new { dto.DLName, dto.Action });
+            using var scope = _logger.BeginScope(new { DLName = LogSanitizer.Clean(dto.DLName), Action = LogSanitizer.Clean(dto.Action) });
             try
             {
                 ValidateMembershipRequest(dto);
@@ -672,7 +704,7 @@ namespace LombardAPI_NEW.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Database save failed for DL: {DLName}", dto.DLName);
+                _logger.LogError(ex, "Database save failed for DL: {DLName}", LogSanitizer.Clean(dto.DLName));
                 return null;
             }
         }

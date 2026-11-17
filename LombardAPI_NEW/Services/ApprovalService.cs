@@ -94,8 +94,11 @@ namespace LombardAPI_NEW.Services
                     .Where(d => d.ApprovalID == request.ApprovalID && d.ApprovalStatus == StatusProcessing)
                     .ExecuteUpdateAsync(s => s.SetProperty(d => d.ApprovalStatus, StatusPending));
 
+                // Improper Error Handling (DAST): never return raw PowerShell / AD / Exchange output
+                // to the browser. Business messages are kept ("User 'x' was not found in Active
+                // Directory."), but anything after " Details:" (the raw engine error) is logged only.
                 string message = ex is ServiceException
-                    ? $"Approval failed: {ex.Message} The request is still pending."
+                    ? $"Approval failed: {ToClientSafeMessage(ex.Message)} The request is still pending."
                     : ApprovalMessages.ApprovalFailed;
 
                 return ApprovalOutcome.Failed(message);
@@ -213,6 +216,17 @@ namespace LombardAPI_NEW.Services
             }
 
             throw new ServiceException($"Unsupported request type '{req.Event}'.");
+        }
+
+        /// <summary>Drops the raw engine error appended after " Details:" and any control characters.</summary>
+        private static string ToClientSafeMessage(string? message)
+        {
+            string value = message ?? string.Empty;
+            int detailsAt = value.IndexOf(" Details:", StringComparison.Ordinal);
+            if (detailsAt >= 0)
+                value = value.Substring(0, detailsAt);
+
+            return RequestValidation.ForLog(value).Trim();
         }
 
         private static bool IsMembershipOrRights(DL req) =>

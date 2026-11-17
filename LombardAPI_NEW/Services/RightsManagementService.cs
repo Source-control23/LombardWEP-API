@@ -66,8 +66,8 @@ namespace LombardAPI_NEW.Services
                 dto.RequestorId = requestorId;
                 dto.RequestorName = requestorName;
 
-                // The DL owner is the approver: always resolved server-side (same lookup the Rights
-                // screen uses) instead of trusting the client value.
+                // The DL owner is the approver: always resolved server-side (OnPrem AD or Exchange
+                // Online, matching the selected source) instead of trusting the client value.
                 dto.DLOwner = await ResolveDLOwnerAsync(dto);
 
                 var ownerEmails = _recipientResolver.ResolveOwnerEmails(dto.DLOwner);
@@ -100,7 +100,10 @@ namespace LombardAPI_NEW.Services
 
         private async Task<string> ResolveDLOwnerAsync(AddOrRemoveRightsDTO dto)
         {
-            AddOrRemoveDLMembershipDTO ownerInfo = await _groupService.GetByDLNameAsync(dto.DLName!);
+            // Same lookup the Rights screen uses for the selected source.
+            AddOrRemoveDLMembershipDTO ownerInfo = dto.Source == "Cloud"
+                ? await _groupService.GetByDLNameCloudAsync(dto.DLName!)
+                : await _groupService.GetByDLNameAsync(dto.DLName!);
 
             string? resolvedOwner = ownerInfo?.DLOwner?.Trim();
 
