@@ -4,6 +4,7 @@ using LombardAPI_NEW.DataBase;
 using LombardAPI_NEW.Extensions;
 using LombardAPI_NEW.Middlewares;
 using LombardAPI_NEW.Models;
+using LombardAPI_NEW.Shared;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -48,7 +49,9 @@ builder.Services.AddDbContext<DataBaseContext>(options =>
 builder.Services.AddControllers();
 
 // Authorization + Authentication
-builder.Services.AddAuthorization();
+// Named policies (SignedInUser / FeatureAccess) declared explicitly on every action
+// (Checkmarx "Missing Function Level Authorization"). Same rules as before.
+builder.Services.AddLombardAuthorization();
 
 // Microsoft Entra ID (Azure AD) access tokens sent by the Angular app (MSAL interceptor).
 // Tokens are validated on every request; every controller is [Authorize] (DAST "Unauthenticated API")
@@ -110,7 +113,9 @@ builder.Services.AddFluentValidationClientsideAdapters();
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 
 // Custom services
-builder.Services.AddLombardServices(builder.Configuration);
+builder.Services.AddLombardServices(
+    builder.Configuration,
+    new Serilog.Extensions.Logging.SerilogLoggerFactory(logger).CreateLogger("Startup"));
 
 // HSTS (Strict-Transport-Security) options — tells browsers to only ever
 // contact this API over HTTPS. Resolves the "Missing HSTS Header" finding.
@@ -123,7 +128,14 @@ builder.Services.AddHsts(options =>
 
 // Swagger
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options =>
+{
+    // Endpoint documentation comes from the XML doc comments on every action
+    // (Checkmarx "Undocumented API"). Swagger itself is still served only in Development.
+    var xmlPath = Path.Combine(AppContext.BaseDirectory, $"{typeof(Program).Assembly.GetName().Name}.xml");
+    if (File.Exists(xmlPath))
+        options.IncludeXmlComments(xmlPath);
+});
 
 //
 // -------------------- CORS (UAT FIXED) --------------------

@@ -22,9 +22,12 @@ namespace LombardAPI_NEW.Shared
             new(@"\(([^()]*)\)\s*$", RegexOptions.Compiled | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
 
         private readonly string _emailDomain;
+        private readonly ILogger<EmailRecipientResolver>? _logger;
 
-        public EmailRecipientResolver(IConfiguration config)
+        public EmailRecipientResolver(IConfiguration config, ILogger<EmailRecipientResolver>? logger = null)
         {
+            _logger = logger;
+
             var domain = config["EmailSettings:EmailDomain"]?.Trim().TrimStart('@');
 
             if (string.IsNullOrWhiteSpace(domain) || domain.Any(c => char.IsWhiteSpace(c) || c == '@'))
@@ -47,9 +50,20 @@ namespace LombardAPI_NEW.Shared
         public string? BuildEmailFromEmployeeId(string? employeeId)
         {
             if (!IsValidEmployeeId(employeeId))
+            {
+                _logger?.LogWarning("Recipient rejected: employee ID failed validation.");
                 return null;
+            }
 
-            return NormalizeAllowedEmail($"{employeeId!.Trim()}@{_emailDomain}");
+            string? email = NormalizeAllowedEmail($"{employeeId!.Trim()}@{_emailDomain}");
+
+            // Audit the recipient decision (no address is logged: PII / CWE-117).
+            if (email == null)
+                _logger?.LogWarning("Recipient rejected: built address is not in the allowed mail domain.");
+            else
+                _logger?.LogDebug("Recipient address built from employee ID.");
+
+            return email;
         }
 
         /// <summary>
@@ -73,6 +87,10 @@ namespace LombardAPI_NEW.Shared
                 string? email = token.Contains('@')
                     ? NormalizeAllowedEmail(token)
                     : BuildEmailFromEmployeeId(token);
+
+                // Audit the owner-recipient decision (no address is logged: PII / CWE-117).
+                if (email == null)
+                    _logger?.LogWarning("DL owner recipient rejected: not a valid address in the allowed mail domain.");
 
                 if (email != null && !result.Contains(email, StringComparer.OrdinalIgnoreCase))
                     result.Add(email);

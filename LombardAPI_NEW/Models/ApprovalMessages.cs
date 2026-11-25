@@ -12,6 +12,7 @@ namespace LombardAPI_NEW.Models
         public const string InvalidAccess = "Invalid access. This approval link can only be used by the DL owner it was sent to.";
         public const string Processing = "This request is currently being processed. Please refresh in a moment.";
         public const string ApprovalFailed = "Approval failed. The request is still pending; please try again or contact support.";
+        public const string ServiceUnavailable = "The request could not be completed right now. Please try again later or contact support.";
 
         public static string AlreadyProcessed(string status) =>
             $"This request has already been {status.ToLowerInvariant()}. No further action is required.";

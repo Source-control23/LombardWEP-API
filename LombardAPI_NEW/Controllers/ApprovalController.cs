@@ -28,7 +28,17 @@ namespace LombardAPI_NEW.Controllers
         /// 200 { status:200, message, data } — data.approvalStatus tells whether actions are allowed (Pending).
         /// 401 not signed in · 403 { status:403, message } not the approver · 404 { status:404, message } invalid link.
         /// </summary>
+        /// <param name="id">Approval ID (GUID) from the approval email link.</param>
+        /// <response code="200">Request details for the DL owner.</response>
+        /// <response code="401">Not signed in.</response>
+        /// <response code="403">Signed-in user is not the DL owner the email was sent to.</response>
+        /// <response code="404">Invalid or expired approval link.</response>
         [HttpGet("request/{id}")]
+        [Authorize(Policy = AuthPolicies.SignedInUser)]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> GetRequest(string id)
         {
             var outcome = await _approvalService.GetRequestForApproverAsync(id, CallerIdentity.FromPrincipal(User));
@@ -41,7 +51,21 @@ namespace LombardAPI_NEW.Controllers
         }
 
         /// <summary>200 "Approved Successfully" (text) · 401/403/404/409/500 with a text message.</summary>
+        /// <param name="id">Approval ID (GUID) from the approval email link.</param>
+        /// <response code="200">Approved and executed.</response>
+        /// <response code="401">Not signed in.</response>
+        /// <response code="403">Signed-in user is not the DL owner the email was sent to.</response>
+        /// <response code="404">Invalid or expired approval link.</response>
+        /// <response code="409">Already approved / rejected / being processed.</response>
+        /// <response code="500">Execution failed; the request stays pending.</response>
         [HttpPost("approve/{id}")]
+        [Authorize(Policy = AuthPolicies.SignedInUser)]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> Approve(string id)
         {
             var outcome = await _approvalService.ApproveAsync(id, CallerIdentity.FromPrincipal(User));
@@ -49,7 +73,19 @@ namespace LombardAPI_NEW.Controllers
         }
 
         /// <summary>200 "Rejected Successfully" (text) · 401/403/404/409 with a text message.</summary>
+        /// <param name="id">Approval ID (GUID) from the approval email link.</param>
+        /// <response code="200">Rejected.</response>
+        /// <response code="401">Not signed in.</response>
+        /// <response code="403">Signed-in user is not the DL owner the email was sent to.</response>
+        /// <response code="404">Invalid or expired approval link.</response>
+        /// <response code="409">Already approved / rejected / being processed.</response>
         [HttpPost("reject/{id}")]
+        [Authorize(Policy = AuthPolicies.SignedInUser)]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
         public async Task<IActionResult> Reject(string id)
         {
             var outcome = await _approvalService.RejectAsync(id, CallerIdentity.FromPrincipal(User));

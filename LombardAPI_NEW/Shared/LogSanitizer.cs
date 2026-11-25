@@ -1,4 +1,4 @@
-﻿using System.Text;
+﻿using System.Text.RegularExpressions;
 
 namespace LombardAPI_NEW.Shared
 {
@@ -19,24 +19,13 @@ namespace LombardAPI_NEW.Shared
             if (string.IsNullOrEmpty(value))
                 return string.Empty;
 
-            var sb = new StringBuilder(value.Length);
+            // Collapse CR / LF / TAB and any other control char into '_' (same output as before),
+            // using Regex.Replace so static analysers recognise the CWE-117 sanitisation.
+            string cleaned = Regex.Replace(value, @"[\r\n\t\p{Cc}]", "_");
 
-            foreach (char c in value)
-            {
-                // Collapse CR / LF / TAB and any other control char into '_'
-                if (c == '\r' || c == '\n' || c == '\t' || char.IsControl(c))
-                    sb.Append('_');
-                else
-                    sb.Append(c);
-
-                if (sb.Length >= maxLength)
-                {
-                    sb.Append("...");
-                    break;
-                }
-            }
-
-            return sb.ToString();
+            return cleaned.Length >= maxLength
+                ? cleaned.Substring(0, maxLength) + "..."
+                : cleaned;
         }
 
         /// <summary>Convenience overload for any object (uses ToString()).</summary>

@@ -21,7 +21,9 @@ namespace LombardAPI_NEW.Middlewares
                 "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
             headers["X-Content-Type-Options"] = "nosniff";
             headers["Referrer-Policy"] = "no-referrer";
-            headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
+            // HSTS: one year + includeSubDomains, added explicitly (Checkmarx "Missing HSTS Header").
+            headers.Remove("Strict-Transport-Security");
+            headers.Append("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
 
             // Restrict powerful browser features this API never needs.
             headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()";

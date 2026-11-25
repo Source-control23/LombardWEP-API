@@ -182,9 +182,24 @@ namespace LombardAPI_NEW.Services
 
             string approvalId = guid.ToString();
 
-            DL? request = await _context.DLDetails
-                .AsNoTracking()
-                .FirstOrDefaultAsync(d => d.ApprovalID == approvalId);
+            DL? request;
+            try
+            {
+                request = await _context.DLDetails
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(d => d.ApprovalID == approvalId);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;   // client disconnected / request aborted: let ASP.NET Core handle it
+            }
+            catch (Exception ex)
+            {
+                // Improper Exception Handling: DB failure is handled explicitly and returned as a
+                // generic 500 message; the real error stays in the server log only.
+                _logger.LogError(ex, "Failed to load approval request. ApprovalID: {ApprovalID}", approvalId);
+                return (null, ApprovalOutcome.Failed(ApprovalMessages.ServiceUnavailable));
+            }
 
             if (request == null || !IsMembershipOrRights(request))
                 return (null, ApprovalOutcome.NotFound());
@@ -232,16 +247,34 @@ namespace LombardAPI_NEW.Services
         private static bool IsMembershipOrRights(DL req) =>
             req.Event is "Membership | OnPrem" or "Membership | Cloud" or "Rights | OnPrem" or "Rights | Cloud";
 
-        private async Task<string> CurrentStatusAsync(string approvalId) =>
-            await _context.DLDetails.AsNoTracking()
-                .Where(d => d.ApprovalID == approvalId)
-                .Select(d => d.ApprovalStatus)
-                .FirstOrDefaultAsync() ?? StatusPending;
+        /// <summary>Current status of the request, or null when it could not be read (DB failure, logged).</summary>
+        private async Task<string?> CurrentStatusAsync(string approvalId)
+        {
+            try
+            {
+                return await _context.DLDetails.AsNoTracking()
+                    .Where(d => d.ApprovalID == approvalId)
+                    .Select(d => d.ApprovalStatus)
+                    .FirstOrDefaultAsync() ?? StatusPending;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to read current approval status. ApprovalID: {ApprovalID}", approvalId);
+                return null;
+            }
+        }
 
-        private static ApprovalOutcome StatusConflict(string status) =>
-            status == StatusProcessing
-                ? ApprovalOutcome.Conflict(ApprovalMessages.Processing)
-                : ApprovalOutcome.Conflict(ApprovalMessages.AlreadyProcessed(status));
+        /// <summary>409 for a known status; generic 500 message when the status could not be read.</summary>
+        private static ApprovalOutcome StatusConflict(string? status) =>
+            status == null
+                ? ApprovalOutcome.Failed(ApprovalMessages.ServiceUnavailable)
+                : status == StatusProcessing
+                    ? ApprovalOutcome.Conflict(ApprovalMessages.Processing)
+                    : ApprovalOutcome.Conflict(ApprovalMessages.AlreadyProcessed(status));
 
         private async Task TryNotifyAsync(Func<Task<bool>> send, string kind, string approvalId)
         {

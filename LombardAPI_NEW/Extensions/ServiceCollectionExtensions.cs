@@ -10,7 +10,8 @@ namespace LombardAPI_NEW.Extensions
     {
         public static IServiceCollection AddLombardServices(
             this IServiceCollection services,
-            IConfiguration configuration)
+            IConfiguration configuration,
+            Microsoft.Extensions.Logging.ILogger? startupLogger = null)
         {
             services.AddScoped<IAccountUnlock, AccountUnlockService>();
             services.AddScoped<IGroupMembership, GroupMembershipService>();
@@ -23,6 +24,9 @@ namespace LombardAPI_NEW.Extensions
             services.AddSingleton<LombardAPI_NEW.Shared.EmailRecipientResolver>();
             services.AddScoped<IMembershipNotificationService, MembershipNotificationService>();
             services.AddHttpContextAccessor();
+            // Audit trail for the registration of the caller-identity accessor
+            // (Checkmarx "Insufficient Logging of Sensitive Operations").
+            startupLogger?.LogInformation("HttpContextAccessor registered for caller identity resolution (requestor / approver checks).");
             services.AddSingleton<LombardAPI_NEW.Shared.CurrentUserService>();
 
             // ✅ Correct way

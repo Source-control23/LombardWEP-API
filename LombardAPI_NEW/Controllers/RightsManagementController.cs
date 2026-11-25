@@ -12,7 +12,8 @@ namespace LombardAPI_NEW.Controllers
     /// <summary>
     /// DL Rights (Send Email access) lookup + requests. Same protection as the DAST-cleared
     /// Account Unlock module: token required ([Authorize] → 401) and the "Feature.Access"
-    /// app role required (→ 403, Privilege Escalation fix).
+    /// app role required (→ 403, Privilege Escalation fix), enforced by the
+    /// <see cref="AuthPolicies.FeatureAccess"/> policy declared on every action.
     /// </summary>
     [Authorize]
     [ApiController]
@@ -33,19 +34,23 @@ namespace LombardAPI_NEW.Controllers
             _logger = logger;
         }
 
-        // Checks raw token claims directly — immune to RoleClaimType mapping issues.
-        private bool HasFeatureAccess() =>
-            User.Claims.Any(c =>
-                (c.Type == "roles" || c.Type == "role" ||
-                 c.Type.EndsWith("/role") || c.Type.EndsWith("/roles"))
-                && c.Value == "Feature.Access");
-
+        /// <summary>Looks up a DL (owner details) for a Rights request.</summary>
+        /// <param name="dlName">Distribution list name.</param>
+        /// <param name="source">OnPrem (default) or Cloud.</param>
+        /// <response code="200">DL details.</response>
+        /// <response code="400">Invalid DL name / source, or DL not found.</response>
+        /// <response code="401">Not signed in.</response>
+        /// <response code="403">Caller does not hold the Feature.Access role.</response>
+        /// <response code="500">Unexpected error.</response>
         [HttpGet("{dlName}")]
+        [Authorize(Policy = AuthPolicies.FeatureAccess)]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> GetByDLName(string dlName, [FromQuery] string? source)
         {
-            if (!HasFeatureAccess())
-                return Forbid();
-
             // CWE-117 Log Forging: strip CR/LF/control chars from user input at entry.
             dlName = System.Text.RegularExpressions.Regex.Replace(dlName ?? string.Empty, @"[\r\n\t\p{Cc}]", string.Empty);
 
@@ -82,12 +87,22 @@ namespace LombardAPI_NEW.Controllers
             }
         }
 
+        /// <summary>Creates a DL Rights (send-as / accept-messages-from) Add/Remove request and emails the DL owner.</summary>
+        /// <param name="dto">DL name, action, rights holders and source.</param>
+        /// <response code="200">Request sent to the DL owner.</response>
+        /// <response code="400">Validation failed or the request could not be created.</response>
+        /// <response code="401">Not signed in.</response>
+        /// <response code="403">Caller does not hold the Feature.Access role.</response>
+        /// <response code="500">Unexpected error.</response>
         [HttpPost("AddOrRemoveRights")]
+        [Authorize(Policy = AuthPolicies.FeatureAccess)]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> AddOrRemoveRights(AddOrRemoveRightsDTO dto)
         {
-            if (!HasFeatureAccess())
-                return Forbid();
-
             if (dto == null || !ModelState.IsValid)
                 return BadRequest(new { Message = "Invalid request payload." });
 

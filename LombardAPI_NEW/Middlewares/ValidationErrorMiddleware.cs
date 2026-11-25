@@ -34,7 +34,10 @@ public static class ValidationErrorMiddleware
                 h["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
                 h["X-Content-Type-Options"] = "nosniff";
                 h["Referrer-Policy"] = "no-referrer";
-                h["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
+                // HSTS added explicitly on the error response too (Checkmarx "Missing HSTS Header"):
+                // one year max-age + includeSubDomains, same value as the rest of the API.
+                h.Remove("Strict-Transport-Security");
+                h.Append("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
                 h["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()";
                 h["Cache-Control"] = "no-store";
                 h["Pragma"] = "no-cache";

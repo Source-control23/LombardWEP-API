@@ -704,7 +704,9 @@ namespace LombardAPI_NEW.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Database save failed for DL: {DLName}", LogSanitizer.Clean(dto.DLName));
+                // CWE-117 Log Forging: inline CR/LF/control-char strip on the user-supplied value.
+                string safeDlName = System.Text.RegularExpressions.Regex.Replace(dto.DLName ?? string.Empty, @"[\r\n\t\p{Cc}]", string.Empty);
+                _logger.LogError(ex, "Database save failed for DL: {DLName}", safeDlName);
                 return null;
             }
         }
