@@ -7,6 +7,10 @@ public static class ValidationErrorMiddleware
     {
         app.UseExceptionHandler(errorApp =>
         {
+            // The error handler is its own pipeline branch: enable HSTS on it explicitly
+            // (uses the AddHsts options from Program.cs: 365 days, includeSubDomains, preload).
+            errorApp.UseHsts();
+
             errorApp.Run(async context =>
             {
                 var exceptionHandler = context.Features.Get<IExceptionHandlerFeature>();
@@ -37,7 +41,7 @@ public static class ValidationErrorMiddleware
                 // HSTS added explicitly on the error response too (Checkmarx "Missing HSTS Header"):
                 // one year max-age + includeSubDomains, same value as the rest of the API.
                 h.Remove("Strict-Transport-Security");
-                h.Append("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+                h.Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
                 h["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()";
                 h["Cache-Control"] = "no-store";
                 h["Pragma"] = "no-cache";

@@ -27,6 +27,9 @@ var logger = new LoggerConfiguration()
 builder.Logging.ClearProviders();
 builder.Logging.AddSerilog(logger);
 
+// Startup audit logger for security-relevant registrations (authorization, identity accessor).
+var startupLogger = new Serilog.Extensions.Logging.SerilogLoggerFactory(logger).CreateLogger("Startup");
+
 //
 // -------------------- SERVICES --------------------
 //
@@ -51,7 +54,7 @@ builder.Services.AddControllers();
 // Authorization + Authentication
 // Named policies (SignedInUser / FeatureAccess) declared explicitly on every action
 // (Checkmarx "Missing Function Level Authorization"). Same rules as before.
-builder.Services.AddLombardAuthorization();
+builder.Services.AddLombardAuthorization(startupLogger);
 
 // Microsoft Entra ID (Azure AD) access tokens sent by the Angular app (MSAL interceptor).
 // Tokens are validated on every request; every controller is [Authorize] (DAST "Unauthenticated API")
@@ -113,9 +116,7 @@ builder.Services.AddFluentValidationClientsideAdapters();
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 
 // Custom services
-builder.Services.AddLombardServices(
-    builder.Configuration,
-    new Serilog.Extensions.Logging.SerilogLoggerFactory(logger).CreateLogger("Startup"));
+builder.Services.AddLombardServices(builder.Configuration, startupLogger);
 
 // HSTS (Strict-Transport-Security) options — tells browsers to only ever
 // contact this API over HTTPS. Resolves the "Missing HSTS Header" finding.
